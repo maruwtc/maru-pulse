@@ -12,6 +12,11 @@ A FastAPI + vanilla-JS webapp built on the [OpenBB Platform](https://github.com/
 - **Extended hours**: pre-market / after-hours price on the quote header, watchlist and index cards (from Yahoo via
   `yfinance`, which OpenBB's quote model doesn't expose); 1D / 5D charts include 4:00–20:00 ET trading in a muted color
   (toggle **Ext hrs**), with live pre/post ticks. My Position shows what your shares' P/L would be at the extended price.
+- **Market calendar** (home page, above Top Stories): critical / major US economic releases for the next 7 days
+  (Fed decisions, CPI, payrolls, core PCE, GDP, plus PPI, retail sales, ISM, JOLTS, claims, …) with consensus /
+  previous / actual, a countdown to the next critical release, and major earnings (≥ $50B or on your watchlist).
+  Stock pages show an upcoming-earnings chip, and AI trade ideas / position reviews are told about these catalysts.
+  Data: OpenBB `nasdaq` provider (keyless); importance tiers are assigned by the app.
 - **Company logos** everywhere a ticker appears (header, watchlist, movers, search) via `/api/logo/{symbol}`, which
   fetches from keyless public sources (Financial Modeling Prep, then Parqet), caches to `.cache/logos/`, and falls back
   to a colored monogram. White-on-transparent logos are detected and shown on a dark tile.
@@ -60,6 +65,8 @@ Open http://localhost:8000
 | `GET /api/quotes?symbols=`, `GET /api/sparklines?symbols=` | Batch quotes / intraday sparklines |
 | `GET /api/overview/{symbol}` | Profile + fundamentals |
 | `GET /api/logo/{symbol}` | Company logo (PNG, cached) |
+| `GET /api/calendar?days=7&symbols=` | Critical/major economic events + earnings |
+| `GET /api/next-earnings/{symbol}` | Next earnings date within 3 weeks |
 | `POST /api/analyze` `{symbol, model}` | Streamed AI analysis (SSE) |
 | `GET /api/signals/{symbol}` | Technical + options signals |
 | `POST /api/trade-ideas` `{symbol, model, risk, deep}` | AI trade ideas, validated & priced (SSE) |

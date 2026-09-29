@@ -44,6 +44,7 @@
       <ul class="watchlist" id="watchlist"></ul>
       <div class="side-head"><h3>Recently viewed</h3></div>
       <div class="chips" id="recent"></div>
+      <div class="upnext" id="upnext" hidden></div>
       <p class="side-foot muted tiny">Data via OpenBB Platform · yfinance &amp; SEC. Quotes may be delayed. Not investment advice.</p>
     </aside>
     <div class="scrim" id="scrim"></div>
@@ -62,6 +63,28 @@
       </section>
 
       <div class="home-grid">
+        <div class="home-main">
+        <section class="card cal-card" id="cal-card">
+          <div class="card-head">
+            <div>
+              <h2>Market Calendar</h2>
+              <div class="muted tiny">US releases &amp; earnings · next 7 days · times ET</div>
+            </div>
+            <div class="cal-controls">
+              <div class="seg small" id="cal-filter">
+                <button data-f="critical">Critical</button>
+                <button data-f="all" class="active">Major + critical</button>
+              </div>
+              <div class="seg" id="cal-tabs">
+                <button data-tab="economy" class="active">Economy</button>
+                <button data-tab="earnings">Earnings</button>
+              </div>
+            </div>
+          </div>
+          <div id="cal-next"></div>
+          <div id="cal-body" class="cal-body"></div>
+        </section>
+
         <section class="card">
           <div class="card-head">
             <h2>Top Stories</h2>
@@ -75,6 +98,7 @@
           </div>
           <div id="market-news" class="news"></div>
         </section>
+        </div>
 
         <section class="card movers-card">
           <div class="card-head">
@@ -101,6 +125,7 @@
             <div class="qc-sym"><h1 id="q-symbol">—</h1><span class="exch" id="q-exch"></span></div>
             <div class="qc-name" id="q-name"></div>
             <div class="chips" id="q-tags"></div>
+            <div class="earn-chip" id="q-earn" hidden></div>
           </div>
         </div>
         <div class="qc-right">

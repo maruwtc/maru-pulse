@@ -741,6 +741,8 @@ def build_trade_context(symbol: str) -> tuple[str, dict]:
         parts.append("## Headlines\n" + "\n".join(f"- [{(n.get('date') or '')[:10]}] {n['title']}" for n in news))
     except HTTPException:
         pass
+    if cal := calendar_context(symbol):
+        parts.append(cal + "\n(Account for these: e.g. earnings inflate IV and gap risk; avoid holding short premium through them unless intended.)")
     return "\n\n".join(parts), {"spot": spot, "chain": chain, "signals": sig}
 
 
@@ -968,6 +970,8 @@ def build_review_context(symbol: str, positions: list[Position], question: str |
         parts.append("## Headlines\n" + "\n".join(f"- [{(n.get('date') or '')[:10]}] {n['title']}" for n in get_news(symbol, 10)))
     except HTTPException:
         pass
+    if cal := calendar_context(symbol):
+        parts.append(cal)
     if question:
         parts.append(f"## Trader's question\n{question.strip()[:1000]}")
     return "\n\n".join(p for p in parts if p), {"spot": spot, "chain": chain, "signals": sig, "evaluation": ev}
@@ -1038,6 +1042,125 @@ async def positions_review(req: PositionsRequest):
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+# ---------------------------------------------------------------- market calendar
+
+# The Nasdaq feed has no importance field, so rank US releases by what moves markets.
+CRITICAL_EVENTS = [
+    r"interest rate decision", r"fed funds rate", r"^fomc (statement|press conference|economic projections|meeting minutes|minutes)",
+    r"^(core )?cpi\b", r"consumer price index", r"^nonfarm payrolls", r"^unemployment rate", r"^core pce price index",
+    r"^gdp( \(qoq\)| growth rate| annualized)?$",
+]
+MAJOR_EVENTS = [
+    r"^(core )?ppi\b", r"producer price index", r"^(core )?retail sales", r"^ism (manufacturing|non-manufacturing|services) pmi$",
+    r"^jolts job openings", r"^adp nonfarm", r"^initial jobless claims", r"^cb consumer confidence",
+    r"michigan consumer sentiment$", r"^(core )?durable goods orders", r"^average hourly earnings", r"^pce price index",
+    r"^core pce prices", r"^gdp price index", r"^building permits$", r"^housing starts$", r"^new home sales$",
+    r"^existing home sales$", r"^industrial production", r"^crude oil inventories", r"beige book", r"^trade balance$",
+]
+EARNINGS_MAJOR_CAP = 50e9
+
+
+def event_tier(name: str) -> str | None:
+    n = name.lower().strip()
+    if "speaks" in n or "testifies" in n:  # only the Fed Chair moves markets reliably
+        return "critical" if re.search(r"\bfed chair\b", n) and "vice" not in n else None
+    if any(re.search(p, n) for p in CRITICAL_EVENTS):
+        return "critical"
+    if any(re.search(p, n) for p in MAJOR_EVENTS):
+        return "major"
+    return None
+
+
+def economic_calendar(days: int) -> list[dict]:
+    def load():
+        start = datetime.now(NY).date()
+        df = obb_call(obb.economy.calendar, provider="nasdaq", start_date=start, end_date=start + timedelta(days=days))
+        df = df[df["country"] == "United States"]
+        grouped: dict[tuple, dict] = {}
+        for r in df.itertuples():
+            tier = event_tier(str(r.event))
+            if not tier:
+                continue
+            d = r.date.to_pydatetime() if hasattr(r.date, "to_pydatetime") else r.date
+            key = (d, r.event.strip().lower())  # same release is sometimes listed with different casing
+            g = grouped.setdefault(key, {"datetime": d.isoformat(), "date": d.date().isoformat(),
+                                         "time": d.strftime("%H:%M"), "event": r.event.strip(), "tier": tier,
+                                         "description": r.description[:400] if isinstance(r.description, str) and r.description else None,
+                                         "values": []})
+            vals = {k: (str(getattr(r, k)).strip() if getattr(r, k) not in (None, "") else None)
+                    for k in ("consensus", "previous", "actual")}
+            vals = {k: (None if v in ("-", "", "nan", "None") else v) for k, v in vals.items()}
+            if any(vals.values()) and vals not in g["values"]:
+                g["values"].append(vals)
+        return sorted(grouped.values(), key=lambda x: (x["datetime"], x["tier"] != "critical", x["event"]))
+
+    return cached(f"econcal:{days}", 900, load)
+
+
+def earnings_calendar(days: int) -> list[dict]:
+    def load():
+        start = datetime.now(NY).date()
+        df = obb_call(obb.equity.calendar.earnings, provider="nasdaq", start_date=start, end_date=start + timedelta(days=days))
+        out = []
+        for r in records(df):
+            sym = str(r.get("symbol") or "")
+            if not sym or "." in sym:  # skip duplicate share-class listings like MKC.V
+                continue
+            out.append({"date": str(r.get("report_date"))[:10], "symbol": sym, "name": r.get("name"),
+                        "market_cap": r.get("market_cap"), "time": r.get("reporting_time"),
+                        "eps_consensus": r.get("eps_consensus"), "eps_previous": r.get("eps_previous"),
+                        "num_estimates": r.get("num_estimates")})
+        return sorted(out, key=lambda x: (x["date"], -(x["market_cap"] or 0)))
+
+    return cached(f"earncal:{days}", 1800, load)
+
+
+def next_earnings(symbol: str, days: int = 21) -> dict | None:
+    try:
+        return next((e for e in earnings_calendar(days) if e["symbol"] == symbol), None)
+    except HTTPException:
+        return None
+
+
+@app.get("/api/calendar")
+def calendar(days: int = 7, symbols: str = ""):
+    """Critical / major US economic releases and major earnings (plus any `symbols`, e.g. the watchlist)."""
+    days = max(1, min(days, 14))
+    watch = {x.strip().upper() for x in symbols.split(",") if x.strip()}
+    out = {"days": days, "economic": [], "earnings": [], "errors": []}
+    try:
+        out["economic"] = economic_calendar(days)
+    except HTTPException as e:
+        out["errors"].append(f"economic: {e.detail}")
+    try:
+        out["earnings"] = [dict(e, watch=e["symbol"] in watch) for e in earnings_calendar(days)
+                           if (e["market_cap"] or 0) >= EARNINGS_MAJOR_CAP or e["symbol"] in watch]
+    except HTTPException as e:
+        out["errors"].append(f"earnings: {e.detail}")
+    return out
+
+
+@app.get("/api/next-earnings/{symbol}")
+def next_earnings_route(symbol: str):
+    return next_earnings(symbol.upper()) or {}
+
+
+def calendar_context(symbol: str) -> str:
+    """Upcoming catalysts for AI prompts: the symbol's earnings date and critical US macro releases."""
+    lines = []
+    e = next_earnings(symbol)
+    if e:
+        lines.append(f"- {symbol} EARNINGS {e['date']} ({e.get('time') or 'time n/a'}), EPS consensus {e.get('eps_consensus')}")
+    try:
+        for ev in economic_calendar(10):
+            if ev["tier"] == "critical":
+                v = ev["values"][0] if ev["values"] else {}
+                lines.append(f"- {ev['date']} {ev['time']} ET {ev['event']} (consensus {v.get('consensus')}, prev {v.get('previous')})")
+    except HTTPException:
+        pass
+    return "## Upcoming catalysts\n" + "\n".join(lines[:12]) if lines else ""
+
+
 # ---------------------------------------------------------------- company logos
 
 LOGO_DIR = ROOT / ".cache" / "logos"
@@ -1081,4 +1204,9 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "static" / "index.html")
+    """Serve the page with CSS/JS URLs versioned by file mtime so browsers never run stale assets."""
+    html = (ROOT / "static" / "index.html").read_text()
+    for name in ("style.css", "app.js"):
+        v = int((ROOT / "static" / name).stat().st_mtime)
+        html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
+    return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})
