@@ -15,6 +15,7 @@
   --accent-2: #f2f3f5;
   --accent-soft: rgba(255, 255, 255, .08);
   --ai: #a78bfa; /* AI Analysis keeps its own violet */
+  --moderate: #60a5fa; /* risk profile: green → blue → amber */
   --up: #16c784;
   --up-soft: rgba(22, 199, 132, .13);
   --down: #f0464f;
@@ -40,6 +41,7 @@
   --accent-2: #111111;
   --accent-soft: rgba(0, 0, 0, .06);
   --ai: #7c3aed;
+  --moderate: #2563eb;
   --up: #0f9d63;
   --up-soft: rgba(15, 157, 99, .1);
   --down: #dc2e3a;
@@ -380,7 +382,7 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .risk-pick .seg { padding: 3px; gap: 2px; align-self: flex-start; }
 .risk-pick .seg button { gap: 7px; padding: 6px 14px; font-size: 13px; border: 1px solid transparent; transition: color .15s, background .15s, border-color .15s; }
 .risk-pick .seg button .i { width: 15px; height: 15px; stroke-width: 2; opacity: .85; }
-.risk-pick .seg button.active { --c: var(--accent); color: var(--c); background: transparent; border-color: var(--c) !important; box-shadow: none; }
+.risk-pick .seg button.active { --c: var(--moderate); color: var(--c); background: transparent; border-color: var(--c) !important; box-shadow: none; }
 .risk-pick .seg button.active .i { opacity: 1; }
 .risk-pick .seg button.active[data-risk="conservative"] { --c: var(--up); }
 .risk-pick .seg button.active[data-risk="aggressive"] { --c: var(--warn); }
