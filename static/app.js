@@ -1489,20 +1489,22 @@ function renderPositions() {
   const review = state.posReview && state.posReview.hash === posHash(state.positions) ? state.posReview : null;
   const actions = Object.fromEntries((review?.positions || []).map((p) => [p.index, p]));
   const rows = ev.rows.map((r) => {
-    const sub = r.unpriced ? `cost ${fmt(r.cost)} · <span class="warn-note" style="margin:0">price unavailable</span>`
+    // Cost has its own "Unit cost" column; the caption shows the current price and contract details.
+    const sub = r.unpriced ? `<span class="warn-note" style="margin:0">price unavailable</span>`
       : r.kind === "option"
-      ? `cost ${fmt(r.cost)} → ${r.quoted === false ? "last" : "mid"} ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
-      : `avg ${fmt(r.cost)} → ${fmt(r.mark)}`;
+      ? `${r.quoted === false ? "last" : "mid"} ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
+      : `now ${fmt(r.mark)}`;
     const a = actions[r.index];
     return `<tr>
       <td><div class="desc"><span class="kind ${r.side === "buy" ? "long" : "short"}">${r.side === "buy" ? "LONG" : "SHORT"}</span><div><b>${esc(r.label.replace(/^(Long|Short) /, ""))}</b><div class="sub">${sub}</div></div></div></td>
+      <td>${fmt(r.cost)}<div class="sub">${r.kind === "option" ? `${money(r.cost * 100)}/contract` : "per share"}</div></td>
       <td>${money(r.market_value)}</td>
       <td class="${cls(r.pnl)}">${r.pnl >= 0 ? "+" : ""}${money(r.pnl)}</td>
       <td class="${cls(r.pnl_pct)}">${pct(r.pnl_pct, 1)}</td>
       <td>${fmt(r.delta, 0)}</td>
       <td class="${r.theta ? cls(r.theta) : ""}">${r.theta ? money(r.theta, 2) : "—"}</td>
       <td><button class="rm-btn" title="Remove" data-rm-pos="${r.index}">×</button></td>
-    </tr>${a ? `<tr class="act-row"><td colspan="7"><span class="act-chip ${ACTION_TONE[a.action] || "mid"}"><b>${esc(String(a.action).replace("_", " "))}</b>${esc(a.reason || "")}</span></td></tr>` : ""}`;
+    </tr>${a ? `<tr class="act-row"><td colspan="8"><span class="act-chip ${ACTION_TONE[a.action] || "mid"}"><b>${esc(String(a.action).replace("_", " "))}</b>${esc(a.reason || "")}</span></td></tr>` : ""}`;
   }).join("");
   const p = ev.payoff;
   $("#pos-body").innerHTML = `
@@ -1514,7 +1516,7 @@ function renderPositions() {
       <div class="m"><div class="k">Cost basis</div><div class="v">${money(t.cost_basis)}</div></div>
     </div>
     <div class="pos-table-wrap"><table class="pos-table">
-      <thead><tr><th>Position</th><th>Value</th><th>P/L</th><th>%</th><th>Δ</th><th>Θ/day</th><th></th></tr></thead>
+      <thead><tr><th>Position</th><th title="Average cost per share (options: premium per share, ×100 per contract)">Unit cost</th><th>Value</th><th>P/L</th><th>%</th><th>Δ</th><th>Θ/day</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     ${p ? `<div class="pos-payoff"><div class="row"><b style="font-size:13px">Combined payoff at ${shortDate(p.horizon)}</b>
       <span class="muted tiny">Breakeven ${(p.breakevens || []).map((b) => fmt(b)).join(" / ") || "—"} · Max profit ${p.max_profit == null ? "unlimited" : money(p.max_profit)} · Max loss ${p.max_loss == null ? "unlimited" : money(p.max_loss)} · P(profit) ${fmt(p.pop, 0)}%</span></div>
