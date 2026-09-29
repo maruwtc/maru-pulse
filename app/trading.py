@@ -132,11 +132,17 @@ def technicals(bars: list[dict], price: float) -> dict:
 
 
 def clean_chain(df: pd.DataFrame, spot: float) -> pd.DataFrame:
+    """Price every listed contract: live mid when there's a two-sided quote, else the last trade.
+
+    Outside market hours Yahoo reports bid/ask = 0 for nearly every contract, so dropping
+    unquoted rows would empty the chain. `quoted` marks rows priced from a live bid/ask."""
     df = df.copy()
     df["expiration"] = pd.to_datetime(df["expiration"]).dt.date
-    df = df[(df["bid"] > 0) & (df["ask"] >= df["bid"])]
-    df["mid"] = (df["bid"] + df["ask"]) / 2
-    df["spread_pct"] = (df["ask"] - df["bid"]) / df["mid"]
+    bid, ask = df["bid"].fillna(0), df["ask"].fillna(0)
+    df["quoted"] = (bid > 0) & (ask >= bid)
+    df["mid"] = np.where(df["quoted"], (bid + ask) / 2, df["last_trade_price"].fillna(0))
+    df = df[df["mid"] > 0]
+    df["spread_pct"] = np.where(df["quoted"], (df["ask"] - df["bid"]) / df["mid"], np.nan)
     df["iv"] = df["implied_volatility"].where((df["implied_volatility"] > 0.03) & (df["implied_volatility"] < 3))
     df["T"] = df["dte"].clip(lower=0.5) / 365
     df["delta"] = [
@@ -202,21 +208,30 @@ def options_summary(chain: pd.DataFrame, spot: float, hv20: float | None) -> dic
 
 
 def candidate_contracts(chain: pd.DataFrame, spot: float, exps: list[date]) -> pd.DataFrame:
-    """Liquid contracts near the money that the LLM may use as legs."""
+    """Liquid contracts near the money that the LLM may use as legs.
+
+    Prefers live two-sided quotes; off-hours (no quotes) falls back to contracts with open
+    interest priced at their last trade."""
     out = []
     for e in exps:
         for kind in ("call", "put"):
-            s = chain[(chain["expiration"] == e) & (chain["option_type"] == kind)
-                      & (chain["strike"].between(spot * 0.8, spot * 1.2)) & (chain["spread_pct"] < 0.35)]
+            near = chain[(chain["expiration"] == e) & (chain["option_type"] == kind)
+                         & (chain["strike"].between(spot * 0.8, spot * 1.2))]
+            s = near[near["quoted"] & (near["spread_pct"] < 0.35)]
+            if len(s) < 6:  # off-hours: Yahoo zeroes bid/ask (and often open interest) before the open
+                s = near[near["quoted"] | (near["open_interest"].fillna(0) > 0)]
+            if len(s) < 6:
+                s = near
             s = s.iloc[(s["strike"] - spot).abs().argsort()].head(12).sort_values("strike")
             out.append(s)
     return pd.concat(out) if out else chain.head(0)
 
 
 def contracts_table(df: pd.DataFrame) -> str:
-    lines = ["expiration,type,strike,bid,ask,mid,iv%,delta,open_interest,volume"]
+    lines = ["expiration,type,strike,bid,ask,price,price_source,iv%,delta,open_interest,volume"]
     for r in df.itertuples():
         lines.append(f"{r.expiration},{r.option_type},{r.strike:g},{r.bid:.2f},{r.ask:.2f},{r.mid:.2f},"
+                     f"{'mid' if r.quoted else 'last_trade'},"
                      f"{(r.iv * 100 if r.iv == r.iv else 0):.0f},{(r.delta if r.delta is not None else 0):.2f},{r.open_interest},{r.volume}")
     return "\n".join(lines)
 
@@ -254,6 +269,7 @@ def resolve_legs(legs: list[dict], chain: pd.DataFrame, spot: float) -> tuple[li
         out.append({
             "action": action, "type": kind, "qty": qty, "strike": r2(row["strike"]), "expiration": exp.isoformat(),
             "dte": int(row["dte"]), "bid": r2(row["bid"]), "ask": r2(row["ask"]), "mid": r2(row["mid"]),
+            "quoted": bool(row["quoted"]),
             "iv": r2(row["iv"] * 100, 1) if row["iv"] == row["iv"] else None,
             "delta": r2(row["delta"]) if row["delta"] is not None else None,
             "open_interest": int(row["open_interest"] or 0), "contract": row["contract_symbol"],
@@ -390,7 +406,7 @@ def evaluate_positions(positions: list[dict], chain: pd.DataFrame | None, spot: 
         rows.append({
             "index": i, "kind": "option", "side": side, "qty": qty, "type": kind, "strike": c["strike"],
             "expiration": c["expiration"], "dte": c["dte"], "cost": r2(cost), "mark": r2(mark), "bid": c["bid"], "ask": c["ask"],
-            "iv": c.get("iv"), "market_value": r2(mv), "cost_basis": r2(basis), "pnl": r2(mv - basis),
+            "iv": c.get("iv"), "quoted": c.get("quoted", True), "market_value": r2(mv), "cost_basis": r2(basis), "pnl": r2(mv - basis),
             "pnl_pct": r2((mark / cost - 1) * 100 * sign) if cost else None,
             "delta": r2(sign * qty * 100 * delta), "theta": r2(sign * qty * 100 * theta),
             "moneyness": ("ITM" if (spot > c["strike"]) == (kind == "call") else "OTM") if abs(spot / c["strike"] - 1) > 0.005 else "ATM",

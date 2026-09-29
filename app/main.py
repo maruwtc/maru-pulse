@@ -21,6 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
+import pandas as pd
 from yfinance.data import YfData
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -626,16 +627,20 @@ async def analyze(req: AnalyzeRequest):
 # ---------------------------------------------------------------- signals & trade ideas
 
 
-def get_chain(symbol: str, spot: float):
+def get_chain_raw(symbol: str):
+    """Every listed contract as returned by Yahoo (including ones with no live quote)."""
     def load():
         try:
-            df = obb_call(obb.derivatives.options.chains, symbol, provider=PROVIDER)
+            return obb_call(obb.derivatives.options.chains, symbol, provider=PROVIDER)
         except HTTPException:  # Yahoo's options endpoint fails intermittently; one retry fixes most
             time.sleep(1)
-            df = obb_call(obb.derivatives.options.chains, symbol, provider=PROVIDER)
-        return trading.clean_chain(df, spot)
+            return obb_call(obb.derivatives.options.chains, symbol, provider=PROVIDER)
 
-    return cached(f"chain:{symbol}", 300, load)
+    return cached(f"chainraw:{symbol}", 300, load)
+
+
+def get_chain(symbol: str, spot: float):
+    return cached(f"chain:{symbol}", 300, lambda: trading.clean_chain(get_chain_raw(symbol), spot))
 
 
 def get_signals(symbol: str) -> dict:
@@ -880,16 +885,26 @@ def chain_meta(symbol: str):
     symbol = symbol.upper()
     spot = get_quote(symbol)["last_price"]
     try:
-        chain = get_chain(symbol, spot)
+        raw = get_chain_raw(symbol)
+        priced = get_chain(symbol, spot)
     except HTTPException:
         return {"spot": spot, "expirations": []}
+    prices = {(r.expiration, r.option_type, float(r.strike)): (round(float(r.mid), 2), bool(r.quoted))
+              for r in priced.itertuples()}
+    raw = raw.assign(expiration=pd.to_datetime(raw["expiration"]).dt.date)
     out = []
-    for exp, g in chain.groupby("expiration"):
-        contracts = {}
+    for exp, g in raw.groupby("expiration"):
+        # All listed strikes, so any contract a user holds can be entered — not just liquid ones.
+        strikes = sorted({f"{k:g}" for k in g["strike"]}, key=float)
+        mids: dict[str, dict] = {}
+        live: dict[str, dict] = {}
         for r in g.itertuples():
-            contracts.setdefault(f"{r.strike:g}", {})[r.option_type] = round(float(r.mid), 2)
+            p = prices.get((exp, r.option_type, float(r.strike)))
+            if p:
+                mids.setdefault(f"{r.strike:g}", {})[r.option_type] = p[0]
+                live.setdefault(f"{r.strike:g}", {})[r.option_type] = p[1]
         out.append({"expiration": exp.isoformat(), "dte": int(g["dte"].iloc[0]),
-                    "strikes": sorted(contracts, key=float), "mids": contracts})
+                    "strikes": strikes, "mids": mids, "live": live})
     return {"spot": spot, "expirations": out}
 
 
