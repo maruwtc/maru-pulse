@@ -10,9 +10,10 @@
   --text: #e8ebf2;
   --text-2: #b4bccb;
   --muted: #7d8699;
-  --accent: #5b7cfa;
-  --accent-2: #8b5cf6;
-  --accent-soft: rgba(91, 124, 250, .14);
+  /* Monochrome accent: white on the dark theme, black on the light theme. */
+  --accent: #f2f3f5;
+  --accent-2: #f2f3f5;
+  --accent-soft: rgba(255, 255, 255, .08);
   --up: #16c784;
   --up-soft: rgba(22, 199, 132, .13);
   --down: #f0464f;
@@ -34,8 +35,9 @@
   --text: #0f1422;
   --text-2: #3b4458;
   --muted: #6b7489;
-  --accent: #4262f0;
-  --accent-soft: rgba(66, 98, 240, .1);
+  --accent: #111111;
+  --accent-2: #111111;
+  --accent-soft: rgba(0, 0, 0, .06);
   --up: #0f9d63;
   --up-soft: rgba(15, 157, 99, .1);
   --down: #dc2e3a;
@@ -145,9 +147,9 @@ kbd { font: 500 11px "JetBrains Mono", monospace; padding: 1px 6px; border-radiu
 .btn { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-weight: 600; }
 .btn:hover { border-color: var(--text-2); }
 .btn.primary { border: 1px solid var(--accent); color: var(--accent); background: transparent; }
-.btn.primary:hover { border-color: var(--text); color: var(--text); }
+.btn.primary:hover { opacity: .7; }
 .btn:disabled { opacity: .6; cursor: progress; }
-.link-btn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 6px 0 0; font-weight: 500; }
+.link-btn { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 6px 0 0; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; }
 select { height: 36px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; font: inherit; font-size: 13px; max-width: 100%; }
 
 /* skeletons */
@@ -262,7 +264,7 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .fact .v { font-weight: 600; margin-top: 2px; }
 .about-text { color: var(--text-2); line-height: 1.7; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .about-text.open { -webkit-line-clamp: unset; }
-.link { color: var(--accent) !important; }
+.link { color: var(--accent) !important; text-decoration: underline; text-underline-offset: 3px; }
 
 /* AI */
 .ai-card { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--panel)), var(--panel) 160px); }
