@@ -985,10 +985,26 @@ async function loadConfig() {
   const models = cfg.models.some((m) => m.id === cfg.default_model) ? cfg.models : [{ id: cfg.default_model, label: cfg.default_model, price: "custom" }, ...cfg.models];
   const opts = models.map((m) => `<option value="${esc(m.id)}" ${m.id === saved ? "selected" : ""}>${esc(m.label)} · ${esc(m.price)}</option>`).join("");
   $$(".model-select").forEach((sel) => { sel.innerHTML = opts; sel.title = "USD per 1M tokens (input / output)"; });
+  renderModelChips();
 }
+// One AI model / Deep think preference for every AI feature (set in Settings, shown as a chip on each card).
+const currentModel = () => store.get("mp.model", null) || state.cfg?.default_model;
+function renderModelChips() {
+  const id = currentModel();
+  const m = (state.cfg?.models || []).find((x) => x.id === id);
+  const name = m ? m.label : id || "AI model";
+  const deep = store.get("mp.deep", false);
+  $$(".model-chip").forEach((c) => {
+    $(".mc-name", c).textContent = `${name}${deep ? " · deep" : ""}`;
+    c.title = `AI model: ${name}${m ? ` (${m.price} per 1M tokens)` : ""}${deep ? " · Deep think on" : ""} — change in Settings`;
+  });
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-open-settings]")) openSettings(); });
+
 $$(".model-select").forEach((sel) => sel.addEventListener("change", (e) => {
   store.set("mp.model", e.target.value);
   $$(".model-select").forEach((o) => (o.value = e.target.value));
+  renderModelChips();
   schedulePrefsSync();
 }));
 
@@ -1027,7 +1043,7 @@ function showAnalysis(text, meta, streaming) {
 
 async function analyze() {
   if (!state.aiEnabled) return promptAiSetup();
-  const symbol = state.symbol, btn = $("#analyze-btn"), model = $("#model-select").value;
+  const symbol = state.symbol, btn = $("#analyze-btn"), model = currentModel();
   btn.disabled = true;
   $("#analyze-btn span").textContent = "Analyzing…";
   let text = "", meta = { model };
@@ -1139,7 +1155,8 @@ function setRisk(r, { reload = true } = {}) {
   schedulePrefsSync();
   $$("#risk-tabs button").forEach((b) => { b.classList.toggle("active", b.dataset.risk === r); b.setAttribute("aria-checked", b.dataset.risk === r); });
   $("#risk-desc").textContent = RISKS[r].desc;
-  if (!$("#trade-btn").disabled) $("#trade-btn span").textContent = `Generate ${RISKS[r].label} ideas`;
+  if (!$("#trade-btn").disabled) $("#trade-btn span").textContent = "Generate ideas";
+  $("#trade-btn").title = `Generate ${RISKS[r].label.toLowerCase()} trade ideas`;
   if (reload && state.symbol && !$("#trade-btn").disabled) {
     const t = getTrade(state.symbol, r);
     t ? showTrade(t) : tradeEmpty();
@@ -1151,13 +1168,13 @@ function tradeEmpty() {
   state.trade = null;
   drawLevels();
   const r = state.risk, sym = state.symbol;
-  $("#trade-btn span").textContent = `Generate ${RISKS[r].label} ideas`;
+  $("#trade-btn span").textContent = "Generate ideas";
   if (!state.aiEnabled) {
-    $("#trade-body").innerHTML = `<div style="margin-top:8px">${aiGateHTML("trade ideas")}<p class="muted tiny" style="margin-top:8px">The signals above are computed locally and always available.</p></div>`;
+    $("#trade-body").innerHTML = `<div style="margin-top:8px">${aiGateHTML("trade ideas")}<p class="muted tiny" style="margin-top:8px">The live signals below are computed locally and always available.</p></div>`;
     return;
   }
   const others = Object.keys(RISKS).filter((k) => k !== r && sym && getTrade(sym, k));
-  $("#trade-body").innerHTML = `<div class="trade-empty">No <b>${RISKS[r].label.toLowerCase()}</b> ideas for <b>${esc(sym || "")}</b> yet — click <b>Generate ${RISKS[r].label} ideas</b> (~1 min, under $0.01).
+  $("#trade-body").innerHTML = `<div class="trade-empty">No <b>${RISKS[r].label.toLowerCase()}</b> ideas for <b>${esc(sym || "")}</b> yet — click <b>Generate ideas</b> (~1 min, under $0.01).
     ${others.length ? `<div class="others"><span class="muted tiny">Saved:</span>${others.map((k) => `<button class="chip" data-show-risk="${k}">${RISKS[k].label}</button>`).join("")}</div>` : ""}</div>`;
 }
 $("#trade-body").addEventListener("click", (e) => { const k = e.target.closest("[data-show-risk]")?.dataset.showRisk; if (k) setRisk(k); });
@@ -1182,7 +1199,7 @@ async function generateTrades() {
   renderProgress(prog, active, t0);
   const timer = setInterval(() => { if (active === "model") renderProgress(prog, active, t0); }, 1000);
   try {
-    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model: $(".model-select").value, risk, deep: $("#trade-card .deep-toggle").checked }) });
+    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model: currentModel(), risk, deep: store.get("mp.deep", false) }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -1217,7 +1234,7 @@ async function generateTrades() {
   } finally {
     clearInterval(timer);
     btn.disabled = false;
-    if (symbol === state.symbol && !$(".thesis")) $("#trade-btn span").textContent = `Generate ${RISKS[state.risk].label} ideas`;
+    if (symbol === state.symbol && !$(".thesis")) $("#trade-btn span").textContent = "Generate ideas";
   }
 }
 $("#trade-btn").addEventListener("click", generateTrades);
@@ -1350,7 +1367,7 @@ function showTrade(d) {
     ${ideas.length ? `<div class="sub-h">Option strategies</div><div class="opt-grid">${optHTML}</div>` : ""}
     ${(d.catalysts?.length || d.risks?.length) ? `<div class="sub-h">Catalysts & risks</div><div class="bullets"><div><b class="tiny muted">CATALYSTS</b><ul>${list(d.catalysts)}</ul></div><div><b class="tiny muted">RISKS</b><ul>${list(d.risks)}</ul></div></div>` : ""}`;
   bindPayoffs($("#trade-body"), Object.fromEntries(ideas.map((o, i) => [`t${i}`, o.metrics])));
-  $("#trade-btn span").textContent = `Regenerate ${RISKS[state.risk].label}`;
+  $("#trade-btn span").textContent = "Regenerate";
 }
 
 /* ================================================================ my position */
@@ -1514,8 +1531,7 @@ function renderPositions() {
   $("#pos-review").hidden = !state.positions.length;
   drawLevels();
   if (!state.positions.length) {
-    $("#pos-body").innerHTML = `<div class="pos-empty"><b>No position in ${esc(state.symbol)}</b><div class="muted tiny">Add the shares or option contracts you hold to see live P/L, greeks and a combined payoff — then ask AI to review it.</div>
-      <button class="btn" style="margin-top:12px" onclick="openPosForm(true)">+ Add position</button></div>`;
+    $("#pos-body").innerHTML = `<div class="pos-empty"><b>No position in ${esc(state.symbol)}</b><div class="muted tiny">Use <b>+ Add position</b> to enter the shares or option contracts you hold — you'll see live P/L, greeks and a combined payoff, and can ask AI to review it.</div></div>`;
     return;
   }
   if (!ev) return;
@@ -1543,11 +1559,10 @@ function renderPositions() {
   const p = ev.payoff;
   $("#pos-body").innerHTML = `
     <div class="pos-summary">
-      <div class="m"><div class="k">Market value</div><div class="v">${money(t.market_value)}</div></div>
+      <div class="m"><div class="k">Market value</div><div class="v">${money(t.market_value)}</div><div class="ext-mini">cost ${money(t.cost_basis)}</div></div>
       <div class="m"><div class="k">Unrealized P/L</div><div class="v ${cls(t.pnl)}">${t.pnl >= 0 ? "+" : ""}${money(t.pnl)} <span class="tiny">${pct(t.pnl_pct, 1)}</span></div>${extPnl(ev)}</div>
       <div class="m" title="Share-equivalent exposure: P/L change per $1 move in the stock"><div class="k">Net delta</div><div class="v">${fmt(t.delta, 0)} <span class="tiny muted">sh</span></div></div>
       <div class="m" title="Estimated P/L from one day of time decay"><div class="k">Theta / day</div><div class="v ${t.theta ? cls(t.theta) : ""}">${money(t.theta, 2)}</div></div>
-      <div class="m"><div class="k">Cost basis</div><div class="v">${money(t.cost_basis)}</div></div>
     </div>
     <div class="pos-table-wrap"><table class="pos-table">
       <thead><tr><th>Position</th><th title="Average cost per share (options: premium per share, ×100 per contract)">Unit cost</th><th>Value</th><th>P/L</th><th>%</th><th>Δ</th><th>Θ/day</th><th></th></tr></thead>
@@ -1577,7 +1592,7 @@ async function reviewPositions() {
   paint();
   const timer = setInterval(() => { if (active === "model") paint(); }, 1000);
   try {
-    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, positions: state.positions, question, model: $("#pos-review .model-select").value, deep: $("#pos-review .deep-toggle").checked }) });
+    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, positions: state.positions, question, model: currentModel(), deep: store.get("mp.deep", false) }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -1927,6 +1942,7 @@ function applyPrefs(p) {
     if (p.calTab) { state.calTab = p.calTab; store.set("mp.calTab", p.calTab); }
     if (p.calFilter) { state.calFilter = p.calFilter; store.set("mp.calFilter", p.calFilter); }
     if (p.risk && RISKS[p.risk]) setRisk(p.risk);
+    renderModelChips();
     renderCalendar();
   } finally {
     applyingPrefs = false;
@@ -2019,7 +2035,7 @@ loadConfig().then(() => initAuth(state.cfg)).catch(() => {});
 setRisk(state.risk, { reload: false });
 $$(".deep-toggle").forEach((el) => {
   el.checked = store.get("mp.deep", false);
-  el.addEventListener("change", () => { store.set("mp.deep", el.checked); $$(".deep-toggle").forEach((o) => (o.checked = el.checked)); schedulePrefsSync(); });
+  el.addEventListener("change", () => { store.set("mp.deep", el.checked); $$(".deep-toggle").forEach((o) => (o.checked = el.checked)); renderModelChips(); schedulePrefsSync(); });
 });
 $("#levels-btn").classList.toggle("on", state.showLevels);
 $("#ext-btn").classList.toggle("on", state.showExt);

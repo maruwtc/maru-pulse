@@ -173,27 +173,25 @@
             <div class="card-head">
               <div class="ai-title">
                 <span class="ai-mark trade">⚡</span>
-                <div><h2>Trade Opportunities</h2><div class="muted tiny">Live signals + AI stock setups &amp; option strategies, priced from the real chain</div></div>
+                <div><h2>Trade Opportunities</h2><div class="muted tiny">AI stock setups &amp; option strategies, priced from the real chain</div></div>
+              </div>
+              <div class="ai-controls">
+                <button class="model-chip" data-open-settings title="AI model — change in Settings"><span class="mc-name">AI model</span></button>
+                <button id="trade-btn" class="btn primary"><span>Generate ideas</span></button>
               </div>
             </div>
-            <div id="signals" class="signals"></div>
-            <div class="trade-cta">
-              <div class="risk-pick">
-                <div class="risk-lbl">Risk profile</div>
-                <div class="seg" id="risk-tabs" role="radiogroup" aria-label="Risk profile">
-                  <button data-risk="conservative" role="radio"><svg viewBox="0 0 24 24" class="i"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" /><path d="M9 12l2 2 4-4" /></svg>Conservative</button>
-                  <button data-risk="moderate" role="radio" class="active"><svg viewBox="0 0 24 24" class="i"><path d="M12 4v16M8 20h8M5 8h14" /><path d="M5 8l-3 6a3 3 0 0 0 6 0L5 8zM19 8l-3 6a3 3 0 0 0 6 0l-3-6z" /></svg>Moderate</button>
-                  <button data-risk="aggressive" role="radio"><svg viewBox="0 0 24 24" class="i"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>Aggressive</button>
-                </div>
-                <div class="risk-desc muted tiny" id="risk-desc"></div>
+            <div class="option-row">
+              <span class="option-lbl">Risk profile</span>
+              <div class="seg" id="risk-tabs" role="radiogroup" aria-label="Risk profile">
+                <button data-risk="conservative" role="radio"><svg viewBox="0 0 24 24" class="i"><path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z" /><path d="M9 12l2 2 4-4" /></svg>Conservative</button>
+                <button data-risk="moderate" role="radio" class="active"><svg viewBox="0 0 24 24" class="i"><path d="M12 4v16M8 20h8M5 8h14" /><path d="M5 8l-3 6a3 3 0 0 0 6 0L5 8zM19 8l-3 6a3 3 0 0 0 6 0l-3-6z" /></svg>Moderate</button>
+                <button data-risk="aggressive" role="radio"><svg viewBox="0 0 24 24" class="i"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" /></svg>Aggressive</button>
               </div>
-              <div class="cta-right">
-                <label class="deep" title="Let the model reason step by step before answering — more thorough, but can take 1–3 minutes"><input type="checkbox" class="deep-toggle" /> Deep think</label>
-                <select class="model-select" aria-label="Model"></select>
-                <button id="trade-btn" class="btn primary"><span>Generate trade ideas</span></button>
-              </div>
+              <span class="option-desc muted tiny" id="risk-desc"></span>
             </div>
             <div id="trade-body"></div>
+            <div class="sub-h">Live signals <span class="muted tiny" style="text-transform:none;letter-spacing:0;font-weight:500">computed locally · no AI</span></div>
+            <div id="signals" class="signals"></div>
             <p class="disclaimer">⚠︎ AI-generated for education and research — not investment advice or a recommendation to buy or sell. Options carry substantial risk and can lose 100% of premium (or more for short options). Prices are delayed mid-quotes; verify with your broker before trading.</p>
           </section>
 
@@ -243,13 +241,14 @@
             <div id="pos-body"></div>
 
             <div class="pos-review" id="pos-review" hidden>
-              <div class="sub-h">AI position review</div>
-              <textarea id="pos-question" rows="2" maxlength="1000" placeholder="Optional question — e.g. “Should I roll my calls out to November?” or “Earnings are next week, how do I protect gains?”"></textarea>
-              <div class="pr-actions">
-                <label class="deep" title="Let the model reason step by step before answering — more thorough, but can take 1–3 minutes"><input type="checkbox" class="deep-toggle" /> Deep think</label>
-                <select class="model-select" aria-label="Model"></select>
-                <button class="btn primary" id="pos-review-btn"><span>Review my position</span></button>
+              <div class="section-head">
+                <div class="sub-h">AI position review</div>
+                <div class="ai-controls">
+                  <button class="model-chip" data-open-settings title="AI model — change in Settings"><span class="mc-name">AI model</span></button>
+                  <button class="btn primary" id="pos-review-btn"><span>Review my position</span></button>
+                </div>
               </div>
+              <textarea id="pos-question" rows="2" maxlength="1000" placeholder="Optional question — e.g. “Should I roll my calls out to November?” or “Earnings are next week, how do I protect gains?”"></textarea>
               <div id="pos-review-body"></div>
             </div>
           </section>
@@ -261,7 +260,7 @@
                 <div><h2>AI Analysis</h2><div class="muted tiny">News, technicals &amp; fundamentals synthesized by an LLM via OpenRouter</div></div>
               </div>
               <div class="ai-controls">
-                <select id="model-select" class="model-select" aria-label="Model"></select>
+                <button class="model-chip" data-open-settings title="AI model — change in Settings"><span class="mc-name">AI model</span></button>
                 <button id="analyze-btn" class="btn primary"><span>Analyze</span></button>
               </div>
             </div>

@@ -275,7 +275,7 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .ai-card .ai-mark { color: var(--ai); }
 .ai-card .btn.primary { color: var(--ai); border-color: var(--ai); }
 .ai-card .spinner { border-top-color: var(--ai); }
-.ai-title { display: flex; gap: 12px; align-items: center; }
+.ai-title { display: flex; gap: 12px; align-items: center; flex: 1 1 200px; min-width: 0; } /* subtitle wraps before the actions do */
 .ai-mark { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; color: var(--accent); border: 1.5px solid currentColor; }
 .ai-controls { display: flex; gap: 8px; }
 .ai-empty { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -352,6 +352,21 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .ext-mini b { font-weight: 500; }
 .ic-ext { font: 500 11.5px "JetBrains Mono", monospace; color: var(--muted); margin-top: 2px; }
 
+/* ------------------------------------------------------------ unified card layout
+   Rule: a card (or sub-section) header has its title on the left and its actions on the right;
+   inputs that feed the action sit in an .option-row right below; results follow. */
+.card-head > .ai-controls, .section-head > .ai-controls { margin-left: auto; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.option-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.option-lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.option-desc { flex: 1; min-width: 200px; line-height: 1.45; }
+.section-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 10px; }
+.section-head .sub-h { flex: 1; margin: 0; }
+
+/* Model chip: shows the AI model in use; opens Settings (model + Deep think live there). */
+.model-chip { height: 32px; max-width: 160px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 8px; border: 1px dashed var(--border-2); background: transparent; color: var(--muted); font: 500 12px Inter, sans-serif; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.model-chip:hover { color: var(--text); border-color: var(--text-2); }
+.model-chip .mc-name { overflow: hidden; text-overflow: ellipsis; }
+
 /* ------------------------------------------------------------ trade opportunities */
 .toggle { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-size: 12.5px; font-weight: 500; }
 .toggle:hover { color: var(--text); }
@@ -376,18 +391,13 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .em-bar span { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--accent-soft); border: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent); }
 .em-bar b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); }
 
-.trade-cta { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin: 16px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); }
-.risk-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.risk-lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.risk-pick .seg { padding: 3px; gap: 2px; align-self: flex-start; }
-.risk-pick .seg button { gap: 7px; padding: 6px 14px; font-size: 13px; border: 1px solid transparent; transition: color .15s, background .15s, border-color .15s; }
-.risk-pick .seg button .i { width: 15px; height: 15px; stroke-width: 2; opacity: .85; }
-.risk-pick .seg button.active { --c: var(--moderate); color: var(--c); background: transparent; border-color: var(--c) !important; box-shadow: none; }
-.risk-pick .seg button.active .i { opacity: 1; }
-.risk-pick .seg button.active[data-risk="conservative"] { --c: var(--up); }
-.risk-pick .seg button.active[data-risk="aggressive"] { --c: var(--warn); }
-.risk-desc { max-width: 460px; line-height: 1.45; min-height: 18px; }
-.cta-right { display: flex; gap: 8px; align-items: center; }
+.option-row .seg { padding: 3px; gap: 2px; }
+.option-row .seg button { gap: 7px; padding: 6px 14px; font-size: 13px; border: 1px solid transparent; transition: color .15s, background .15s, border-color .15s; }
+.option-row .seg button .i { width: 15px; height: 15px; stroke-width: 2; opacity: .85; }
+.option-row .seg button.active { --c: var(--moderate); color: var(--c); background: transparent; border-color: var(--c) !important; box-shadow: none; }
+.option-row .seg button.active .i { opacity: 1; }
+.option-row .seg button.active[data-risk="conservative"] { --c: var(--up); }
+.option-row .seg button.active[data-risk="aggressive"] { --c: var(--warn); }
 .deep { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; user-select: none; }
 .deep input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 .deep:has(input:checked) { color: var(--accent); }
@@ -480,7 +490,7 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 
 .pos-empty { padding: 22px; text-align: center; border: 1px dashed var(--border-2); border-radius: 12px; color: var(--text-2); }
 .pos-empty .muted { margin-top: 4px; }
-.pos-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.pos-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .pos-summary .m .v { font-size: 16px; }
 .pos-table-wrap { overflow-x: auto; margin: 0 -4px; }
 .pos-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -507,7 +517,6 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .pos-review { margin-top: 6px; }
 .pos-review textarea { width: 100%; resize: vertical; min-height: 58px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text); font: 14px/1.5 Inter, sans-serif; outline: none; }
 .pos-review textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.pr-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 10px; }
 .verdict { font: 700 12px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; padding: 4px 10px; border-radius: 6px; }
 .verdict.good { background: var(--up-soft); color: var(--up); }
 .verdict.bad { background: var(--down-soft); color: var(--down); }
@@ -559,8 +568,8 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .set-grid select { width: 100%; max-width: none; }
 .set-grid label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; color: var(--text-2); font-size: 13px; }
 .set-grid label.check input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
-.ai-gate { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); font-size: 13px; color: var(--text-2); }
-.ai-gate .btn { height: 32px; }
+.ai-gate { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); font-size: 13px; color: var(--text-2); }
+.ai-gate .btn { height: 32px; margin-left: auto; } /* stays right-aligned even when it wraps */
 
 /* ------------------------------------------------------------ palette */
 .palette { position: fixed; inset: 0; z-index: 50; background: rgba(5, 8, 14, .55); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; animation: fade .15s; }
@@ -584,17 +593,18 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .only-mobile { display: none; }
 
 /* ------------------------------------------------------------ responsive */
+@media (max-width: 1100px) {
+  .index-grid { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; padding-bottom: 4px; }
+  .index-grid::-webkit-scrollbar { display: none; }
+  .index-card { flex: 0 0 180px; scroll-snap-align: start; }
+}
 @media (max-width: 1320px) {
-  .index-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 1180px) {
-  .pos-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .signals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .home-grid, .stock-grid { grid-template-columns: minmax(0, 1fr); }
   .movers-card, .stock-side { position: static; max-height: none; }
-  .ai-empty, .about-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .about-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {
   .opt-grid, .bullets { grid-template-columns: minmax(0, 1fr); }
@@ -626,20 +636,15 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
   .cal-vals .v { align-items: flex-start; min-width: 0; }
   .cal-desc { padding-left: 0; }
   .cal-next .count { font-size: 15px; }
-  .ai-empty, .about-facts { grid-template-columns: minmax(0, 1fr); }
+  .about-facts { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: minmax(0, 1fr); }
-  .signals { grid-template-columns: minmax(0, 1fr); }
   .pf-grid, .levels-grid { grid-template-columns: minmax(0, 1fr); }
-  .pos-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pf-actions { flex-wrap: wrap; }
-  .pr-actions { flex-direction: column; }
-  .pr-actions select { max-width: none; }
+
   .sig.wide { grid-column: auto; }
-  .trade-cta { flex-direction: column; align-items: stretch; }
-  .risk-pick .seg { display: flex; }
-  .risk-pick .seg button { flex: 1; justify-content: center; padding: 7px 6px; font-size: 12px; }
-  .cta-right { flex-direction: column; align-items: stretch; }
-  .trade-cta select { max-width: none; }
+  .option-row .seg { display: flex; width: 100%; }
+  .option-row .seg button { flex: 1; justify-content: center; padding: 7px 6px; font-size: 12px; }
+  .option-row .seg button .i { display: none; } /* labels only on phones so all three fit */
   .kv { grid-template-columns: 1fr; gap: 0 0; }
   .kv dd { margin-bottom: 8px; }
   .ai-controls { width: 100%; }
@@ -658,3 +663,13 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 
 /* Ticker monograms are outlined in the ticker's hue (--h, set per symbol). */
 :root[data-theme="light"] .avatar { color: hsl(var(--h) 65% 38%); border-color: hsl(var(--h) 55% 45%); }
+
+/* Card grids step 4 → 2 → 1 columns by the card's own width (no orphan tiles). */
+.pos-card, .ai-card, .trade-card { container-type: inline-size; }
+@container (max-width: 700px) {
+  .pos-summary, .ai-empty, .signals, .plan-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 380px) {
+  .pos-summary, .ai-empty, .signals, .plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .sig.wide { grid-column: auto; }
+}
