@@ -70,6 +70,7 @@ RANGES = {
 app = FastAPI(title="Maru Pulse")
 log = logging.getLogger("maru_pulse")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # don't log every outbound request
 # OpenBB's yfinance quote fetcher prints a warning and drops the symbol when Yahoo intermittently
 # answers 401; get_quotes() retries those symbols itself, so silence the noisy duplicate.
 warnings.filterwarnings("ignore", message=r"Error getting data for .*")
