@@ -304,24 +304,19 @@
     </div>
   </div>
 
-  <!-- Sign in / create account -->
+  <!-- Sign in (Google only) -->
   <div class="modal" id="auth-modal" hidden>
-    <div class="modal-box" role="dialog" aria-label="Sign in">
+    <div class="modal-box auth-box" role="dialog" aria-label="Sign in">
       <button class="modal-x" data-close aria-label="Close">×</button>
       <div class="modal-brand"><span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M6 20l6-6 5 4 9-9" /></svg></span></div>
-      <h2 id="auth-title">Sign in to Maru Pulse</h2>
-      <p class="muted tiny" id="auth-sub">Sync your watchlist, positions and settings across devices, and use AI with your own OpenRouter key.</p>
-      <div class="seg auth-tabs" id="auth-tabs">
-        <button data-mode="signin" class="active">Sign in</button>
-        <button data-mode="signup">Create account</button>
-      </div>
-      <form id="auth-form" class="auth-form" autocomplete="on">
-        <label id="auth-email-row">Email <input id="auth-email" type="email" autocomplete="email" required /></label>
-        <label id="auth-pass-row">Password <input id="auth-pass" type="password" autocomplete="current-password" minlength="8" required /></label>
-        <div class="auth-msg" id="auth-msg"></div>
-        <button class="btn primary" type="submit" id="auth-submit"><span>Sign in</span></button>
-        <button class="link-btn" type="button" id="auth-forgot">Forgot password?</button>
-      </form>
+      <h2>Sign in to Maru Pulse</h2>
+      <p class="muted auth-sub">Sync your watchlist, positions and settings across devices, and use AI with your own OpenRouter key.</p>
+      <button class="google-btn" id="google-btn">
+        <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        <span>Continue with Google</span>
+      </button>
+      <div class="auth-msg" id="auth-msg"></div>
+      <p class="muted tiny auth-fine">We only receive your name, email and profile picture from Google.</p>
     </div>
   </div>
 
@@ -332,7 +327,7 @@
       <h2>Settings</h2>
       <div class="set-section">
         <div class="set-head"><h3>Account</h3></div>
-        <div class="set-row"><div><b id="set-email">—</b><div class="muted tiny">Watchlist, positions and preferences sync to your account.</div></div>
+        <div class="set-row"><div class="set-user" id="set-user"></div>
           <button class="btn" id="signout-btn">Sign out</button></div>
       </div>
       <div class="set-section">

@@ -1748,77 +1748,47 @@ function closeModal(id) { $(id).hidden = true; }
 $$(".modal").forEach((m) => m.addEventListener("mousedown", (e) => { if (e.target === m || e.target.closest("[data-close]")) m.hidden = true; }));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $$(".modal").forEach((m) => (m.hidden = true)); });
 
-let authMode = "signin";
-function setAuthMode(mode) {
-  authMode = mode;
-  $$("#auth-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-  $("#auth-tabs").hidden = mode === "reset" || mode === "newpass";
-  $("#auth-email-row").hidden = mode === "newpass";
-  $("#auth-pass-row").hidden = mode === "reset";
-  $("#auth-pass").required = mode !== "reset";
-  $("#auth-email").required = mode !== "newpass";
-  $("#auth-pass").autocomplete = mode === "signin" ? "current-password" : "new-password";
-  $("#auth-forgot").hidden = mode !== "signin";
-  $("#auth-title").textContent = { signin: "Sign in to Maru Pulse", signup: "Create your account", reset: "Reset your password", newpass: "Choose a new password" }[mode];
-  $("#auth-submit span").textContent = { signin: "Sign in", signup: "Create account", reset: "Send reset link", newpass: "Update password" }[mode];
-  authMsg("");
-}
-function authMsg(text, kind = "err") { const m = $("#auth-msg"); m.textContent = text; m.className = `auth-msg ${text ? kind : ""}`; }
-function openAuth(mode = "signin") {
+function authMsg(text) { $("#auth-msg").textContent = text; $("#auth-msg").className = `auth-msg ${text ? "err" : ""}`; }
+function openAuth() {
   if (!sb) return toast("Sign-in isn't configured on this server.");
-  setAuthMode(mode);
-  openModal("#auth-modal");
-  setTimeout(() => (mode === "newpass" ? $("#auth-pass") : $("#auth-email")).focus(), 30);
-}
-$("#auth-tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setAuthMode(b.dataset.mode); });
-$("#auth-forgot").addEventListener("click", () => setAuthMode("reset"));
-$("#auth-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const email = $("#auth-email").value.trim(), password = $("#auth-pass").value;
-  const btn = $("#auth-submit");
-  btn.disabled = true;
   authMsg("");
-  try {
-    if (authMode === "signin") {
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      closeModal("#auth-modal");
-    } else if (authMode === "signup") {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } });
-      if (error) throw error;
-      if (data.session) closeModal("#auth-modal");
-      else authMsg("Almost done — check your inbox and click the confirmation link, then sign in.", "ok");
-    } else if (authMode === "reset") {
-      const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
-      if (error) throw error;
-      authMsg("If that email has an account, a reset link is on its way.", "ok");
-    } else if (authMode === "newpass") {
-      const { error } = await sb.auth.updateUser({ password });
-      if (error) throw error;
-      closeModal("#auth-modal");
-      toast("Password updated", false);
-    }
-  } catch (err) {
-    authMsg(err.message || "Something went wrong. Try again.");
-  } finally {
-    btn.disabled = false;
-  }
+  openModal("#auth-modal");
+}
+// Google OAuth (PKCE): Google → Supabase → back here with ?code=…, which supabase-js exchanges for a session.
+$("#google-btn").addEventListener("click", async () => {
+  const btn = $("#google-btn");
+  btn.disabled = true;
+  try { sessionStorage.setItem("mp.returnTo", location.hash); } catch {}
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } },
+  });
+  if (error) { authMsg(error.message || "Couldn't start Google sign-in."); btn.disabled = false; }
 });
+
+const displayName = (u) => u?.user_metadata?.full_name || u?.user_metadata?.name || u?.email || "Account";
+const avatarUrl = (u) => u?.user_metadata?.avatar_url || u?.user_metadata?.picture || "";
 
 function renderAccount() {
   const b = $("#account-btn");
   b.hidden = !sb;
   if (!sb) return;
-  b.classList.toggle("signed-in", !!state.user);
-  $("span", b).textContent = state.user ? (state.user.email || "?")[0].toUpperCase() : "Sign in";
-  b.title = state.user ? `${state.user.email} — Settings` : "Sign in";
+  const u = state.user;
+  b.classList.toggle("signed-in", !!u);
+  const pic = avatarUrl(u);
+  b.innerHTML = !u ? "<span>Sign in</span>"
+    : pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${esc(displayName(u)[0].toUpperCase())}'))">`
+    : `<span>${esc(displayName(u)[0].toUpperCase())}</span>`;
+  b.title = u ? `${displayName(u)} — Settings` : "Sign in with Google";
 }
 $("#account-btn").addEventListener("click", () => (state.user ? openSettings() : openAuth()));
 
 /* ---------------- settings */
 function openSettings() {
   if (!state.user) return openAuth();
-  $("#set-email").textContent = state.user.email;
+  const u = state.user, pic = avatarUrl(u);
+  $("#set-user").innerHTML = `${pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc(displayName(u)[0].toUpperCase())}</span>`}
+    <div><b>${esc(displayName(u))}</b><div class="muted tiny">${esc(u.email || "")} · Google account · data syncs across devices</div></div>`;
   renderKeyStatus();
   $$("#pref-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (document.documentElement.dataset.theme === "light" ? "light" : "dark")));
   $("#pref-ext").checked = state.showExt;
@@ -1962,21 +1932,32 @@ function onLogout() {
 
 async function initAuth(cfg) {
   if (!cfg.supabase || !window.supabase) { renderAccount(); refreshAiAvailability(); return; }
-  sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  // PKCE returns ?code=… in the query string, leaving the #/SYMBOL router alone.
+  sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.key, {
+    auth: { flowType: "pkce", persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
   let handled = null;
   const onSession = async (session) => {
     const prev = state.user?.id || null, next = session?.user || null;
     state.user = next;
     renderAccount();
-    if (next && next.id !== handled) { handled = next.id; await syncOnLogin(); toast(`Signed in as ${next.email}`, false); }
+    if (next && next.id !== handled) { handled = next.id; await syncOnLogin(); toast(`Signed in as ${displayName(next)}`, false); }
     if (!next && prev) { handled = null; onLogout(); }
     refreshAiAvailability();
   };
-  sb.auth.onAuthStateChange((event, session) => {
-    if (event === "PASSWORD_RECOVERY") openAuth("newpass");
+  sb.auth.onAuthStateChange((_event, session) => {
     setTimeout(() => onSession(session), 0); // don't await Supabase calls inside the auth callback
   });
-  const { data } = await sb.auth.getSession();
+  const { data } = await sb.auth.getSession(); // also completes the ?code= exchange after the Google redirect
+  // Tidy the OAuth callback URL and return to the page the user signed in from.
+  const qs = new URLSearchParams(location.search);
+  if (qs.has("code") || qs.has("error")) {
+    if (qs.get("error")) toast(`Google sign-in failed: ${qs.get("error_description") || qs.get("error")}`);
+    let back = "";
+    try { back = sessionStorage.getItem("mp.returnTo") || ""; sessionStorage.removeItem("mp.returnTo"); } catch {}
+    history.replaceState(null, "", location.pathname + (back || location.hash));
+    if (back && back !== location.hash) route();
+  }
   await onSession(data.session);
 }
 

@@ -505,7 +505,11 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 
 /* ------------------------------------------------------------ account / modals */
 .account-btn { height: 38px; padding: 0 14px; }
-.account-btn.signed-in { width: 38px; padding: 0; justify-content: center; border-radius: 50%; color: #fff; font-weight: 700; background: linear-gradient(135deg, #14b8a6, var(--accent)); border: 0; }
+.account-btn.signed-in { width: 38px; padding: 0; justify-content: center; border-radius: 50%; color: #fff; font-weight: 700; background: linear-gradient(135deg, #14b8a6, var(--accent)); border: 0; overflow: hidden; }
+.account-btn img { width: 100%; height: 100%; object-fit: cover; }
+.set-user { display: flex; align-items: center; gap: 12px; }
+.set-user img, .set-user .ph { width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; }
+.set-user .ph { display: grid; place-items: center; color: #fff; font-weight: 700; background: linear-gradient(135deg, #14b8a6, var(--accent)); }
 .modal { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: rgba(5, 8, 14, .6); backdrop-filter: blur(4px); animation: fade .15s; }
 .modal-box { position: relative; width: min(420px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel); border: 1px solid var(--border-2); border-radius: 18px; box-shadow: var(--shadow); padding: 26px 24px 22px; }
 .modal-box.wide { width: min(620px, 100%); }
@@ -514,15 +518,15 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .modal-x:hover { background: var(--hover); color: var(--text); }
 .modal-brand { margin-bottom: 14px; }
 .modal-brand .brand-mark { width: 40px; height: 40px; border-radius: 12px; }
-.auth-tabs { display: flex; margin: 16px 0 14px; }
-.auth-tabs button { flex: 1; justify-content: center; padding: 7px; }
-.auth-form { display: flex; flex-direction: column; gap: 12px; }
-.auth-form label, .set-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
-.auth-form input, .key-form input { height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text); font: 15px Inter, sans-serif; outline: none; }
-.auth-form input:focus, .key-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.auth-form .btn.primary { height: 42px; justify-content: center; margin-top: 4px; }
-.auth-form .link-btn { align-self: center; font-size: 13px; }
-.auth-msg { font-size: 13px; line-height: 1.45; min-height: 0; }
+.auth-box { text-align: center; }
+.auth-box .modal-brand { display: flex; justify-content: center; }
+.auth-sub { font-size: 13.5px; line-height: 1.55; margin: 6px 0 20px; }
+.google-btn { width: 100%; height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; border-radius: 12px; border: 1px solid #dadce0; background: #fff; color: #1f1f1f; font: 600 15px Inter, sans-serif; cursor: pointer; transition: box-shadow .15s, background .15s; }
+.google-btn:hover { background: #f8f9fa; box-shadow: 0 1px 6px rgba(0, 0, 0, .25); }
+.google-btn:disabled { opacity: .7; cursor: progress; }
+.auth-fine { margin-top: 14px; }
+.auth-msg { font-size: 13px; line-height: 1.45; margin-top: 12px; }
+.auth-msg:empty { display: none; }
 .auth-msg.err { color: var(--down); }
 .auth-msg.ok { color: var(--up); }
 .set-section { padding: 16px 0; border-top: 1px solid var(--border); }

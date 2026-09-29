@@ -17,7 +17,7 @@ A FastAPI + vanilla-JS webapp built on the [OpenBB Platform](https://github.com/
   previous / actual, a countdown to the next critical release, and major earnings (≥ $50B or on your watchlist).
   Stock pages show an upcoming-earnings chip, and AI trade ideas / position reviews are told about these catalysts.
   Data: OpenBB `nasdaq` provider (keyless); importance tiers are assigned by the app.
-- **Accounts (Supabase)** — email/password sign-in. Watchlist, My Position entries and preferences (theme, AI model,
+- **Accounts (Supabase)** — Sign in with Google (the only sign-in method; OAuth PKCE flow). Watchlist, My Position entries and preferences (theme, AI model,
   risk profile, Deep think, chart toggles, calendar view) sync to your account; the first sign-in imports what this
   browser already had. Signed-out use still works, stored locally.
 - **BYOK AI** — each user saves their own OpenRouter key in Settings. It's verified with OpenRouter, stored encrypted in
@@ -63,9 +63,11 @@ Open http://localhost:8000
 1. Apply the schema in [`supabase/migrations`](supabase/migrations) (tables with row-level security, plus Vault-backed key functions).
 2. `.env`: set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (public), and `SUPABASE_SECRET_KEY`
    (Dashboard → Project Settings → API Keys → Secret keys; server-only, never ship it to the browser).
-3. Dashboard → Authentication → URL Configuration: Site URL `http://localhost:8000`, and add it to Redirect URLs
-   (used by email confirmation and password-reset links).
-4. Sign up in the app, then Settings → OpenRouter API key.
+3. Dashboard → Authentication → Sign In / Providers: enable **Google** (OAuth client ID + secret from Google Cloud,
+   authorized redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`) and disable **Email**.
+4. Dashboard → Authentication → URL Configuration: Site URL `http://localhost:8000`, and add `http://localhost:8000/**`
+   to Redirect URLs so Google sign-in returns to the app.
+5. Click **Sign in → Continue with Google**, then Settings → OpenRouter API key.
 
 ## API
 
