@@ -1401,7 +1401,12 @@ function currentMark() {
 }
 function updatePosHint() {
   const m = currentMark();
-  $("#pos-form-hint").textContent = m != null ? `Current ${posForm.kind === "option" ? "mid" : "price"}: ${fmt(m)}${posForm.kind === "option" ? ` (${money(m * 100)} per contract)` : ""}` : "";
+  if (posForm.kind === "stock") { $("#pos-form-hint").textContent = m != null ? `Current price: ${fmt(m)}` : ""; return; }
+  const e = state.chainMeta?.expirations.find((x) => x.expiration === $("#pos-exp").value);
+  const live = e?.live?.[$("#pos-strike").value]?.[posForm.type];
+  $("#pos-form-hint").textContent = m != null
+    ? `${live ? "Current mid" : "Last trade (no live quote)"}: ${fmt(m)} (${money(m * 100)} per contract)`
+    : "No trades yet for this contract — enter your cost";
 }
 $("#pos-use-mark").addEventListener("click", () => { const m = currentMark(); if (m != null) $("#pos-cost").value = m; });
 
@@ -1486,7 +1491,7 @@ function renderPositions() {
   const rows = ev.rows.map((r) => {
     const sub = r.unpriced ? `cost ${fmt(r.cost)} · <span class="warn-note" style="margin:0">price unavailable</span>`
       : r.kind === "option"
-      ? `cost ${fmt(r.cost)} → mid ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
+      ? `cost ${fmt(r.cost)} → ${r.quoted === false ? "last" : "mid"} ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
       : `avg ${fmt(r.cost)} → ${fmt(r.mark)}`;
     const a = actions[r.index];
     return `<tr>
