@@ -17,6 +17,12 @@ A FastAPI + vanilla-JS webapp built on the [OpenBB Platform](https://github.com/
   previous / actual, a countdown to the next critical release, and major earnings (≥ $50B or on your watchlist).
   Stock pages show an upcoming-earnings chip, and AI trade ideas / position reviews are told about these catalysts.
   Data: OpenBB `nasdaq` provider (keyless); importance tiers are assigned by the app.
+- **Accounts (Supabase)** — Sign in with Google (the only sign-in method; OAuth PKCE flow). Watchlist, My Position entries and preferences (theme, AI model,
+  risk profile, Deep think, chart toggles, calendar view) sync to your account; the first sign-in imports what this
+  browser already had. Signed-out use still works, stored locally.
+- **BYOK AI** — each user saves their own OpenRouter key in Settings. It's verified with OpenRouter, stored encrypted in
+  Supabase Vault, and never returned to the browser (only the last 4 characters are shown). The server decrypts it with
+  the secret key only after verifying the user's session, and AI usage is billed to that user's OpenRouter account.
 - **Company logos** everywhere a ticker appears (header, watchlist, movers, search) via `/api/logo/{symbol}`, which
   fetches from keyless public sources (Financial Modeling Prep, then Parqet), caches to `.cache/logos/`, and falls back
   to a colored monogram. White-on-transparent logos are detected and shown on a dark tile.
@@ -46,11 +52,22 @@ All market data comes from OpenBB's keyless providers (`yfinance`, `sec`).
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # then add OPENROUTER_API_KEY
+cp .env.example .env   # then add SUPABASE_SECRET_KEY (see Supabase setup)
 .venv/bin/uvicorn app.main:app --port 8000 --reload --timeout-graceful-shutdown 3
 ```
 
 Open http://localhost:8000
+
+### Supabase setup
+
+1. Apply the schema in [`supabase/migrations`](supabase/migrations) (tables with row-level security, plus Vault-backed key functions).
+2. `.env`: set `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` (public), and `SUPABASE_SECRET_KEY`
+   (Dashboard → Project Settings → API Keys → Secret keys; server-only, never ship it to the browser).
+3. Dashboard → Authentication → Sign In / Providers: enable **Google** (OAuth client ID + secret from Google Cloud,
+   authorized redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`) and disable **Email**.
+4. Dashboard → Authentication → URL Configuration: Site URL `http://localhost:8000`, and add `http://localhost:8000/**`
+   to Redirect URLs so Google sign-in returns to the app.
+5. Click **Sign in → Continue with Google**, then Settings → OpenRouter API key.
 
 ## API
 
@@ -73,3 +90,6 @@ Open http://localhost:8000
 | `GET /api/chain-meta/{symbol}` | Expirations, strikes, mids |
 | `POST /api/positions/evaluate` | Mark positions to market (P/L, greeks, payoff) |
 | `POST /api/positions/review` `{symbol, positions, question, model, deep}` | AI position review (SSE) |
+| `POST /api/byok/refresh` | Drop the server's cached copy of the caller's key |
+
+AI endpoints require `Authorization: Bearer <Supabase access token>` from a user who has saved an OpenRouter key.

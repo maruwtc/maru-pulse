@@ -36,7 +36,11 @@ from app import trading
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+# Supabase: auth + per-user data. The publishable key is public (RLS protects data); the secret
+# key is server-only and is used solely to decrypt a signed-in user's BYOK OpenRouter key.
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
 DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 NY = ZoneInfo("America/New_York")
 PROVIDER = "yfinance"
@@ -66,6 +70,7 @@ RANGES = {
 app = FastAPI(title="Maru Pulse")
 log = logging.getLogger("maru_pulse")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # don't log every outbound request
 # OpenBB's yfinance quote fetcher prints a warning and drops the symbol when Yahoo intermittently
 # answers 401; get_quotes() retries those symbols itself, so silence the noisy duplicate.
 warnings.filterwarnings("ignore", message=r"Error getting data for .*")
@@ -337,7 +342,9 @@ def get_news(symbols: str, limit: int) -> list[dict]:
 
 @app.get("/api/config")
 def config():
-    return {"models": MODELS, "default_model": DEFAULT_MODEL, "ai_enabled": bool(OPENROUTER_API_KEY)}
+    return {"models": MODELS, "default_model": DEFAULT_MODEL,
+            "supabase": {"url": SUPABASE_URL, "key": SUPABASE_PUBLISHABLE_KEY} if SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY else None,
+            "byok_ready": bool(SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY)}
 
 
 @app.get("/api/search")
@@ -558,13 +565,17 @@ class OpenRouterError(Exception):
     pass
 
 
-async def openrouter_stream(messages: list[dict], model: str, **extra):
+async def openrouter_stream(api_key: str, messages: list[dict], model: str, **extra):
     """Yield ("text", str) chunks then ("usage", dict) from an OpenRouter streaming completion."""
     body = {"model": model, "stream": True, "usage": {"include": True}, "messages": messages, **extra}
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "X-Title": "Maru Pulse",
+    headers = {"Authorization": f"Bearer {api_key}", "X-Title": "Maru Pulse",
                "HTTP-Referer": "http://localhost:8000"}
     async with httpx.AsyncClient(timeout=180) as client:
         async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", json=body, headers=headers) as r:
+            if r.status_code in (401, 403):
+                raise OpenRouterError("OpenRouter rejected your API key — update it in Settings.")
+            if r.status_code == 402:
+                raise OpenRouterError("Your OpenRouter account is out of credits — top up at openrouter.ai/credits.")
             if r.status_code != 200:
                 raise OpenRouterError(f"OpenRouter {r.status_code}: {(await r.aread()).decode()[:500]}")
             async for line in r.aiter_lines():
@@ -593,14 +604,76 @@ def reasoning_opts(deep: bool) -> dict:
     return {"reasoning": {"max_tokens": 6000} if deep else {"enabled": False}}
 
 
-def require_key():
-    if not OPENROUTER_API_KEY:
-        raise HTTPException(400, "OPENROUTER_API_KEY is not set. Add it to .env and restart.")
+# ---------------------------------------------------------------- auth + BYOK
+
+_user_cache: dict[str, tuple[float, dict]] = {}
+_key_cache: dict[str, tuple[float, str | None]] = {}
+
+
+async def current_user(request: Request) -> dict | None:
+    """Resolve the Supabase user from `Authorization: Bearer <access token>` (verified by Supabase Auth)."""
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer ") or not SUPABASE_URL:
+        return None
+    token = auth[7:].strip()
+    hit = _user_cache.get(token)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{SUPABASE_URL}/auth/v1/user",
+                                 headers={"apikey": SUPABASE_PUBLISHABLE_KEY, "Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        raise HTTPException(503, "Couldn't reach the sign-in service. Try again.")
+    if r.status_code != 200:
+        return None
+    user = r.json()
+    _user_cache[token] = (time.time(), user)
+    return user
+
+
+async def user_openrouter_key(user_id: str) -> str | None:
+    hit = _key_cache.get(user_id)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"{SUPABASE_URL}/rest/v1/rpc/get_api_key_for_user",
+                              headers={"apikey": SUPABASE_SECRET_KEY, "Authorization": f"Bearer {SUPABASE_SECRET_KEY}"},
+                              json={"p_user_id": user_id, "p_provider": "openrouter"})
+    if r.status_code != 200:
+        log.info("BYOK lookup failed (%s): %s", r.status_code, r.text[:120])
+        raise HTTPException(503, "Couldn't load your API key. Try again.")
+    key = r.json() or None
+    _key_cache[user_id] = (time.time(), key)
+    return key
+
+
+async def require_ai_key(request: Request) -> str:
+    """AI features use the signed-in user's own OpenRouter key (BYOK)."""
+    if not (SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY):
+        raise HTTPException(503, "Server is missing Supabase settings (SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY).")
+    user = await current_user(request)
+    if not user:
+        raise HTTPException(401, "Sign in to use AI features.")
+    key = await user_openrouter_key(user["id"])
+    if not key:
+        raise HTTPException(400, "Add your OpenRouter API key in Settings to use AI features.")
+    return key
+
+
+@app.post("/api/byok/refresh")
+async def byok_refresh(request: Request):
+    """Called by the browser after saving/removing a key so the server drops its cached copy."""
+    user = await current_user(request)
+    if not user:
+        raise HTTPException(401, "Not signed in.")
+    _key_cache.pop(user["id"], None)
+    return {"ok": True}
 
 
 @app.post("/api/analyze")
-async def analyze(req: AnalyzeRequest):
-    require_key()
+async def analyze(req: AnalyzeRequest, request: Request):
+    api_key = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     context = await run_in_threadpool(build_context, symbol)
@@ -611,7 +684,7 @@ async def analyze(req: AnalyzeRequest):
 
     async def gen():
         try:
-            async for kind, value in openrouter_stream(messages, model):
+            async for kind, value in openrouter_stream(api_key, messages, model):
                 if kind == "usage":
                     yield sse("usage", value)
                 elif kind == "text":
@@ -801,8 +874,8 @@ def enrich_ideas(ideas: dict, ctx: dict) -> dict:
 
 
 @app.post("/api/trade-ideas")
-async def trade_ideas(req: TradeRequest):
-    require_key()
+async def trade_ideas(req: TradeRequest, request: Request):
+    api_key = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     risk = req.risk if req.risk in ("conservative", "moderate", "aggressive") else "moderate"
@@ -824,7 +897,7 @@ async def trade_ideas(req: TradeRequest):
             text = ""
             try:
                 thinking = 0
-                async for kind, value in openrouter_stream(messages, model, **reasoning_opts(req.deep)):
+                async for kind, value in openrouter_stream(api_key, messages, model, **reasoning_opts(req.deep)):
                     if kind == "usage":
                         usage = value
                     elif kind == "reasoning":
@@ -993,8 +1066,8 @@ def build_review_context(symbol: str, positions: list[Position], question: str |
 
 
 @app.post("/api/positions/review")
-async def positions_review(req: PositionsRequest):
-    require_key()
+async def positions_review(req: PositionsRequest, request: Request):
+    api_key = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     if not req.positions:
@@ -1015,7 +1088,7 @@ async def positions_review(req: PositionsRequest):
             text = ""
             try:
                 thinking = 0
-                async for kind, value in openrouter_stream(messages, model, **reasoning_opts(req.deep)):
+                async for kind, value in openrouter_stream(api_key, messages, model, **reasoning_opts(req.deep)):
                     if kind == "usage":
                         usage = value
                     elif kind == "reasoning":

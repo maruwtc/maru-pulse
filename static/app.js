@@ -134,6 +134,7 @@ function renderStatus() {
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem("mp.theme", t); } catch {}
+  schedulePrefsSync();
   chart.applyOptions(chartTheme());
   if (state.bars.length) renderChart(false);
 }
@@ -237,6 +238,7 @@ function drawLevels() {
 function setShowLevels(on) {
   state.showLevels = on;
   store.set("mp.levels", on);
+  schedulePrefsSync();
   $("#levels-btn").classList.toggle("on", on);
   drawLevels();
 }
@@ -412,6 +414,7 @@ function renderExt(e) {
 function setShowExt(on) {
   state.showExt = on;
   store.set("mp.ext", on);
+  schedulePrefsSync();
   $("#ext-btn").classList.toggle("on", on);
   if (state.symbol && ["1D", "5D"].includes(state.range)) loadHistory();
 }
@@ -645,6 +648,7 @@ $("#cal-tabs").addEventListener("click", (e) => {
   if (!b) return;
   state.calTab = b.dataset.tab;
   store.set("mp.calTab", state.calTab);
+  schedulePrefsSync();
   renderCalendar();
 });
 $("#cal-filter").addEventListener("click", (e) => {
@@ -652,6 +656,7 @@ $("#cal-filter").addEventListener("click", (e) => {
   if (!b) return;
   state.calFilter = b.dataset.f;
   store.set("mp.calFilter", state.calFilter);
+  schedulePrefsSync();
   renderCalendar();
 });
 $("#cal-body").addEventListener("click", (e) => {
@@ -773,7 +778,14 @@ const inWatchlist = (s) => state.watchlist.includes(s);
 function toggleWatch(sym) {
   const adding = !inWatchlist(sym);
   state.watchlist = adding ? [sym, ...state.watchlist] : state.watchlist.filter((s) => s !== sym);
-  store.set("mp.watchlist", state.watchlist);
+  if (state.user) {
+    const q = adding
+      ? sb.from("watchlist_items").upsert({ user_id: state.user.id, symbol: sym, sort_order: -Math.floor(Date.now() / 1000) })
+      : sb.from("watchlist_items").delete().eq("symbol", sym);
+    q.then(({ error }) => error && toast(`Couldn't sync watchlist: ${error.message}`));
+  } else {
+    store.set("mp.watchlist", state.watchlist);
+  }
   renderStar();
   renderWatchlist();
   if (adding) refreshWatchlist(true);
@@ -934,7 +946,7 @@ list.addEventListener("click", (e) => {
 /* ================================================================ AI analysis */
 async function loadConfig() {
   const cfg = await api("/api/config");
-  state.aiEnabled = cfg.ai_enabled;
+  state.cfg = cfg;
   const saved = store.get("mp.model", cfg.default_model);
   const models = cfg.models.some((m) => m.id === cfg.default_model) ? cfg.models : [{ id: cfg.default_model, label: cfg.default_model, price: "custom" }, ...cfg.models];
   const opts = models.map((m) => `<option value="${esc(m.id)}" ${m.id === saved ? "selected" : ""}>${esc(m.label)} · ${esc(m.price)}</option>`).join("");
@@ -943,6 +955,7 @@ async function loadConfig() {
 $$(".model-select").forEach((sel) => sel.addEventListener("change", (e) => {
   store.set("mp.model", e.target.value);
   $$(".model-select").forEach((o) => (o.value = e.target.value));
+  schedulePrefsSync();
 }));
 
 function aiEmpty(symbol) {
@@ -956,7 +969,7 @@ function aiEmpty(symbol) {
       <div class="ai-feed"><b>Headlines</b>15 latest news stories on ${esc(symbol)}</div>
       ${state.aiEnabled
         ? `<div class="ai-note muted">Click <b>Analyze</b> for a structured research note on ${esc(symbol)} — typically under $0.001 per run.</div>`
-        : `<div class="ai-note warn">Add <code>OPENROUTER_API_KEY</code> to <code>.env</code> and restart the server to enable AI analysis.</div>`}
+        : `<div class="ai-note" style="grid-column:1/-1">${aiGateHTML("analysis")}</div>`}
     </div>`;
 }
 
@@ -979,14 +992,14 @@ function showAnalysis(text, meta, streaming) {
 }
 
 async function analyze() {
-  if (!state.aiEnabled) return toast("Set OPENROUTER_API_KEY in .env and restart the server.");
+  if (!state.aiEnabled) return promptAiSetup();
   const symbol = state.symbol, btn = $("#analyze-btn"), model = $("#model-select").value;
   btn.disabled = true;
   $("#analyze-btn span").textContent = "Analyzing…";
   let text = "", meta = { model };
   showAnalysis("", meta, true);
   try {
-    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol, model }) });
+    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", pending = false;
@@ -1089,6 +1102,7 @@ function getTrade(sym, risk) {
 function setRisk(r, { reload = true } = {}) {
   state.risk = r;
   store.set("mp.risk", r);
+  schedulePrefsSync();
   $$("#risk-tabs button").forEach((b) => { b.classList.toggle("active", b.dataset.risk === r); b.setAttribute("aria-checked", b.dataset.risk === r); });
   $("#risk-desc").textContent = RISKS[r].desc;
   if (!$("#trade-btn").disabled) $("#trade-btn span").textContent = `Generate ${RISKS[r].label} ideas`;
@@ -1105,7 +1119,7 @@ function tradeEmpty() {
   const r = state.risk, sym = state.symbol;
   $("#trade-btn span").textContent = `Generate ${RISKS[r].label} ideas`;
   if (!state.aiEnabled) {
-    $("#trade-body").innerHTML = `<div class="ai-note warn" style="margin-top:8px">Add <code>OPENROUTER_API_KEY</code> to <code>.env</code> and restart the server to generate AI trade ideas. Signals above are computed locally and always available.</div>`;
+    $("#trade-body").innerHTML = `<div style="margin-top:8px">${aiGateHTML("trade ideas")}<p class="muted tiny" style="margin-top:8px">The signals above are computed locally and always available.</p></div>`;
     return;
   }
   const others = Object.keys(RISKS).filter((k) => k !== r && sym && getTrade(sym, k));
@@ -1124,7 +1138,7 @@ function renderProgress(steps, active, t0) {
 }
 
 async function generateTrades() {
-  if (!state.aiEnabled) return toast("Set OPENROUTER_API_KEY in .env and restart the server.");
+  if (!state.aiEnabled) return promptAiSetup();
   const symbol = state.symbol, risk = state.risk, btn = $("#trade-btn");
   btn.disabled = true;
   $("#trade-btn span").textContent = "Generating…";
@@ -1134,7 +1148,7 @@ async function generateTrades() {
   renderProgress(prog, active, t0);
   const timer = setInterval(() => { if (active === "model") renderProgress(prog, active, t0); }, 1000);
   try {
-    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol, model: $(".model-select").value, risk, deep: $("#trade-card .deep-toggle").checked }) });
+    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model: $(".model-select").value, risk, deep: $("#trade-card .deep-toggle").checked }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -1396,7 +1410,7 @@ function updatePosHint() {
 }
 $("#pos-use-mark").addEventListener("click", () => { const m = currentMark(); if (m != null) $("#pos-cost").value = m; });
 
-form.addEventListener("submit", (e) => {
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const qty = parseFloat($("#pos-qty").value), cost = parseFloat($("#pos-cost").value);
   if (!(qty > 0) || !(cost >= 0)) return toast("Enter a quantity and cost.");
@@ -1405,8 +1419,13 @@ form.addEventListener("submit", (e) => {
     if (!$("#pos-exp").value || !$("#pos-strike").value) return toast("Pick an expiration and strike.");
     Object.assign(p, { type: posForm.type, strike: parseFloat($("#pos-strike").value), expiration: $("#pos-exp").value });
   }
+  if (state.user) {
+    const { data, error } = await sb.from("positions").insert(toPosRow(state.symbol, p, state.user.id)).select().single();
+    if (error) return toast(`Couldn't save position: ${error.message}`);
+    p.id = data.id;
+  }
   state.positions.push(p);
-  store.set(posKey(state.symbol), state.positions);
+  if (!state.user) store.set(posKey(state.symbol), state.positions);
   $("#pos-qty").value = "";
   $("#pos-cost").value = "";
   openPosForm(false);
@@ -1414,9 +1433,14 @@ form.addEventListener("submit", (e) => {
   evaluatePositions();
 });
 
-function removePosition(i) {
+async function removePosition(i) {
+  const p = state.positions[i];
+  if (state.user && p?.id) {
+    const { error } = await sb.from("positions").delete().eq("id", p.id);
+    if (error) return toast(`Couldn't remove position: ${error.message}`);
+  }
   state.positions.splice(i, 1);
-  store.set(posKey(state.symbol), state.positions);
+  if (!state.user) store.set(posKey(state.symbol), state.positions);
   evaluatePositions();
 }
 
@@ -1501,7 +1525,7 @@ function renderPositions() {
 $("#pos-body").addEventListener("click", (e) => { const i = e.target.closest("[data-rm-pos]")?.dataset.rmPos; if (i != null) removePosition(+i); });
 
 async function reviewPositions() {
-  if (!state.aiEnabled) return toast("Set OPENROUTER_API_KEY in .env and restart the server.");
+  if (!state.aiEnabled) return promptAiSetup();
   const symbol = state.symbol, btn = $("#pos-review-btn"), question = $("#pos-question").value.trim();
   const hash = posHash(state.positions);
   btn.disabled = true;
@@ -1517,7 +1541,7 @@ async function reviewPositions() {
   paint();
   const timer = setInterval(() => { if (active === "model") paint(); }, 1000);
   try {
-    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ symbol, positions: state.positions, question, model: $("#pos-review .model-select").value, deep: $("#pos-review .deep-toggle").checked }) });
+    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, positions: state.positions, question, model: $("#pos-review .model-select").value, deep: $("#pos-review .deep-toggle").checked }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -1585,8 +1609,14 @@ function renderReview() {
   if (adj.length) bindPayoffs($("#pos-review-body"), Object.fromEntries(adj.map((a, i) => [`a${i}`, a.metrics])));
 }
 
-function loadPositionsFor(symbol) {
-  state.positions = store.get(posKey(symbol), []);
+async function loadPositionsFor(symbol) {
+  state.positions = state.user ? [] : store.get(posKey(symbol), []);
+  if (state.user) {
+    const { data, error } = await sb.from("positions").select("*").eq("symbol", symbol).order("created_at");
+    if (symbol !== state.symbol) return;
+    if (error) toast(`Couldn't load positions: ${error.message}`);
+    state.positions = (data || []).map(fromPosRow);
+  }
   state.posEval = null;
   state.posReview = store.get(`mp.posreview.${symbol}`, null);
   state.chainMeta = state.chainMeta?.symbol === symbol ? state.chainMeta : null;
@@ -1685,19 +1715,275 @@ async function route() {
 }
 window.addEventListener("hashchange", route);
 
+/* ================================================================ account: Supabase auth, sync, BYOK */
+let sb = null; // Supabase client (null when the server has no Supabase config)
+state.user = null;
+state.byok = null; // { key_hint, updated_at } of the saved OpenRouter key; the key itself never reaches the browser
+
+async function authHeaders() {
+  if (!sb) return {};
+  const { data } = await sb.auth.getSession(); // refreshes an expired access token
+  return data.session ? { Authorization: `Bearer ${data.session.access_token}` } : {};
+}
+
+function refreshAiAvailability() {
+  state.aiEnabled = !!(state.user && state.byok);
+  if (state.symbol) {
+    if (!$("#analyze-btn").disabled) aiEmpty(state.symbol);
+    if (!$("#trade-btn").disabled) { const t = getTrade(state.symbol, state.risk); t ? showTrade(t) : tradeEmpty(); }
+  }
+}
+
+// Shown wherever AI is unavailable: tells the user exactly what's missing.
+function aiGateHTML(what) {
+  if (!state.cfg) return "";
+  if (!sb) return `<div class="ai-note warn">AI ${what} needs the server's Supabase settings (see README).</div>`;
+  if (!state.user) return `<div class="ai-gate">Sign in and add your own OpenRouter API key to use AI ${what}. <button class="btn primary" onclick="openAuth()">Sign in</button></div>`;
+  return `<div class="ai-gate">Add your OpenRouter API key to use AI ${what}. <button class="btn primary" onclick="openSettings()">Add API key</button></div>`;
+}
+function promptAiSetup() {
+  if (!state.user) return openAuth();
+  openSettings();
+  toast("Add your OpenRouter API key to use AI features.");
+}
+
+/* ---------------- modals */
+function openModal(id) { $(id).hidden = false; }
+function closeModal(id) { $(id).hidden = true; }
+$$(".modal").forEach((m) => m.addEventListener("mousedown", (e) => { if (e.target === m || e.target.closest("[data-close]")) m.hidden = true; }));
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $$(".modal").forEach((m) => (m.hidden = true)); });
+
+function authMsg(text) { $("#auth-msg").textContent = text; $("#auth-msg").className = `auth-msg ${text ? "err" : ""}`; }
+function openAuth() {
+  if (!sb) return toast("Sign-in isn't configured on this server.");
+  authMsg("");
+  openModal("#auth-modal");
+}
+// Google OAuth (PKCE): Google → Supabase → back here with ?code=…, which supabase-js exchanges for a session.
+$("#google-btn").addEventListener("click", async () => {
+  const btn = $("#google-btn");
+  btn.disabled = true;
+  try { sessionStorage.setItem("mp.returnTo", location.hash); } catch {}
+  const { error } = await sb.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: location.origin + location.pathname, queryParams: { prompt: "select_account" } },
+  });
+  if (error) { authMsg(error.message || "Couldn't start Google sign-in."); btn.disabled = false; }
+});
+
+const displayName = (u) => u?.user_metadata?.full_name || u?.user_metadata?.name || u?.email || "Account";
+const avatarUrl = (u) => u?.user_metadata?.avatar_url || u?.user_metadata?.picture || "";
+
+function renderAccount() {
+  const b = $("#account-btn");
+  b.hidden = !sb;
+  if (!sb) return;
+  const u = state.user;
+  b.classList.toggle("signed-in", !!u);
+  const pic = avatarUrl(u);
+  b.innerHTML = !u ? "<span>Sign in</span>"
+    : pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${esc(displayName(u)[0].toUpperCase())}'))">`
+    : `<span>${esc(displayName(u)[0].toUpperCase())}</span>`;
+  b.title = u ? `${displayName(u)} — Settings` : "Sign in with Google";
+}
+$("#account-btn").addEventListener("click", () => (state.user ? openSettings() : openAuth()));
+
+/* ---------------- settings */
+function openSettings() {
+  if (!state.user) return openAuth();
+  const u = state.user, pic = avatarUrl(u);
+  $("#set-user").innerHTML = `${pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc(displayName(u)[0].toUpperCase())}</span>`}
+    <div><b>${esc(displayName(u))}</b><div class="muted tiny">${esc(u.email || "")} · Google account · data syncs across devices</div></div>`;
+  renderKeyStatus();
+  $$("#pref-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (document.documentElement.dataset.theme === "light" ? "light" : "dark")));
+  $("#pref-ext").checked = state.showExt;
+  $("#pref-levels").checked = state.showLevels;
+  openModal("#settings-modal");
+}
+$("#signout-btn").addEventListener("click", async () => { closeModal("#settings-modal"); await sb.auth.signOut(); toast("Signed out", false); });
+$("#pref-theme").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  applyTheme(b.dataset.theme);
+  $$("#pref-theme button").forEach((x) => x.classList.toggle("active", x === b));
+});
+$("#pref-ext").addEventListener("change", (e) => setShowExt(e.target.checked));
+$("#pref-levels").addEventListener("change", (e) => setShowLevels(e.target.checked));
+
+function renderKeyStatus() {
+  const k = state.byok;
+  $("#key-status").innerHTML = k
+    ? `<span class="ok">✓ Key saved</span><span class="mono">sk-or-…${esc(k.key_hint)}</span><span class="muted tiny">updated ${ago(k.updated_at)}</span><span class="sp"></span><button class="link-btn" id="key-remove" type="button" style="padding:0;color:var(--down)">Remove</button>`
+    : `<span class="none">No key saved</span><span class="muted tiny">AI analysis, trade ideas and position reviews are off until you add one.</span>`;
+  $("#key-input").placeholder = k ? "Paste a new key to replace it" : "sk-or-v1-…";
+  $("#key-remove")?.addEventListener("click", removeKey);
+}
+async function loadByok() {
+  if (!state.user) { state.byok = null; return; }
+  const { data } = await sb.from("user_api_keys").select("key_hint, updated_at").eq("provider", "openrouter").maybeSingle();
+  state.byok = data || null;
+}
+$("#key-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const key = $("#key-input").value.trim();
+  if (!key) return;
+  const btn = $("#key-save");
+  btn.disabled = true;
+  $("#key-save span").textContent = "Verifying…";
+  try {
+    // Check the key with OpenRouter before storing it.
+    const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } });
+    if (r.status === 401 || r.status === 403) throw new Error("OpenRouter rejected this key. Check it and try again.");
+    if (!r.ok) throw new Error(`Couldn't verify the key with OpenRouter (HTTP ${r.status}).`);
+    $("#key-save span").textContent = "Saving…";
+    const { error } = await sb.rpc("set_api_key", { p_provider: "openrouter", p_key: key });
+    if (error) throw error;
+    $("#key-input").value = "";
+    await fetch("/api/byok/refresh", { method: "POST", headers: await authHeaders() });
+    await loadByok();
+    renderKeyStatus();
+    refreshAiAvailability();
+    toast("OpenRouter key verified and saved", false);
+  } catch (err) {
+    toast(err.message || "Couldn't save the key.");
+  } finally {
+    btn.disabled = false;
+    $("#key-save span").textContent = "Verify & save";
+  }
+});
+async function removeKey() {
+  if (!confirm("Remove your saved OpenRouter key? AI features will be off until you add one again.")) return;
+  const { error } = await sb.rpc("delete_api_key", { p_provider: "openrouter" });
+  if (error) return toast(error.message);
+  await fetch("/api/byok/refresh", { method: "POST", headers: await authHeaders() });
+  state.byok = null;
+  renderKeyStatus();
+  refreshAiAvailability();
+  toast("Key removed", false);
+}
+
+/* ---------------- preferences sync */
+function currentPrefs() {
+  return {
+    theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
+    model: store.get("mp.model", null), risk: state.risk, deep: store.get("mp.deep", false),
+    ext: state.showExt, levels: state.showLevels, calTab: state.calTab, calFilter: state.calFilter,
+  };
+}
+let prefsTimer = null, applyingPrefs = false;
+function schedulePrefsSync() {
+  if (!state.user || applyingPrefs) return;
+  clearTimeout(prefsTimer);
+  $("#prefs-sync").textContent = "Saving…";
+  prefsTimer = setTimeout(async () => {
+    const { error } = await sb.from("user_settings").upsert({ user_id: state.user.id, prefs: currentPrefs(), updated_at: new Date().toISOString() });
+    $("#prefs-sync").textContent = error ? "Couldn't sync" : "Synced to your account";
+  }, 800);
+}
+function applyPrefs(p) {
+  applyingPrefs = true;
+  try {
+    if (p.theme) applyTheme(p.theme);
+    if (p.model) { store.set("mp.model", p.model); $$(".model-select").forEach((o) => { if ([...o.options].some((x) => x.value === p.model)) o.value = p.model; }); }
+    if (typeof p.deep === "boolean") { store.set("mp.deep", p.deep); $$(".deep-toggle").forEach((o) => (o.checked = p.deep)); }
+    if (typeof p.ext === "boolean" && p.ext !== state.showExt) setShowExt(p.ext);
+    if (typeof p.levels === "boolean" && p.levels !== state.showLevels) setShowLevels(p.levels);
+    if (p.calTab) { state.calTab = p.calTab; store.set("mp.calTab", p.calTab); }
+    if (p.calFilter) { state.calFilter = p.calFilter; store.set("mp.calFilter", p.calFilter); }
+    if (p.risk && RISKS[p.risk]) setRisk(p.risk);
+    renderCalendar();
+  } finally {
+    applyingPrefs = false;
+  }
+}
+
+/* ---------------- data sync on sign-in / sign-out */
+async function syncOnLogin() {
+  const uid = state.user.id;
+  // Watchlist: the account is the source of truth; seed it from this browser the first time.
+  const { data: wl, error: wlErr } = await sb.from("watchlist_items").select("symbol, sort_order").order("sort_order");
+  if (!wlErr) {
+    if (!wl.length && state.watchlist.length) {
+      await sb.from("watchlist_items").insert(state.watchlist.map((symbol, i) => ({ user_id: uid, symbol, sort_order: i })));
+    } else {
+      state.watchlist = wl.map((r) => r.symbol);
+    }
+  }
+  // Positions: seed from this browser's saved positions the first time.
+  const { count } = await sb.from("positions").select("id", { count: "exact", head: true });
+  if (count === 0) {
+    const rows = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith("mp.pos.")) continue;
+      for (const p of store.get(k, [])) rows.push(toPosRow(k.slice(7), p, uid));
+    }
+    if (rows.length) await sb.from("positions").insert(rows);
+  }
+  // Preferences.
+  const { data: st } = await sb.from("user_settings").select("prefs").maybeSingle();
+  if (st?.prefs && Object.keys(st.prefs).length) applyPrefs(st.prefs);
+  else await sb.from("user_settings").upsert({ user_id: uid, prefs: currentPrefs() });
+  await loadByok();
+  renderWatchlist(); renderStar(); refreshWatchlist(true); loadCalendar();
+  if (state.symbol) loadPositionsFor(state.symbol);
+}
+function onLogout() {
+  state.byok = null;
+  state.watchlist = store.get("mp.watchlist", ["AAPL", "NVDA", "MSFT", "TSLA", "AMZN"]); // back to this browser's guest list
+  renderWatchlist(); renderStar(); refreshWatchlist(true); loadCalendar();
+  if (state.symbol) loadPositionsFor(state.symbol);
+}
+
+async function initAuth(cfg) {
+  if (!cfg.supabase || !window.supabase) { renderAccount(); refreshAiAvailability(); return; }
+  // PKCE returns ?code=… in the query string, leaving the #/SYMBOL router alone.
+  sb = window.supabase.createClient(cfg.supabase.url, cfg.supabase.key, {
+    auth: { flowType: "pkce", persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+  });
+  let handled = null;
+  const onSession = async (session) => {
+    const prev = state.user?.id || null, next = session?.user || null;
+    state.user = next;
+    renderAccount();
+    if (next && next.id !== handled) { handled = next.id; await syncOnLogin(); toast(`Signed in as ${displayName(next)}`, false); }
+    if (!next && prev) { handled = null; onLogout(); }
+    refreshAiAvailability();
+  };
+  sb.auth.onAuthStateChange((_event, session) => {
+    setTimeout(() => onSession(session), 0); // don't await Supabase calls inside the auth callback
+  });
+  const { data } = await sb.auth.getSession(); // also completes the ?code= exchange after the Google redirect
+  // Tidy the OAuth callback URL and return to the page the user signed in from.
+  const qs = new URLSearchParams(location.search);
+  if (qs.has("code") || qs.has("error")) {
+    if (qs.get("error")) toast(`Google sign-in failed: ${qs.get("error_description") || qs.get("error")}`);
+    let back = "";
+    try { back = sessionStorage.getItem("mp.returnTo") || ""; sessionStorage.removeItem("mp.returnTo"); } catch {}
+    history.replaceState(null, "", location.pathname + (back || location.hash));
+    if (back && back !== location.hash) route();
+  }
+  await onSession(data.session);
+}
+
+/* ---------------- positions: account-backed when signed in */
+function toPosRow(symbol, p, uid) {
+  return { user_id: uid, symbol, kind: p.kind, side: p.side, qty: p.qty, cost: p.cost,
+    option_type: p.kind === "option" ? p.type : null, strike: p.kind === "option" ? p.strike : null, expiration: p.kind === "option" ? p.expiration : null };
+}
+const fromPosRow = (r) => ({ id: r.id, kind: r.kind, side: r.side, qty: +r.qty, cost: +r.cost,
+  ...(r.kind === "option" ? { type: r.option_type, strike: +r.strike, expiration: r.expiration } : {}) });
+
 /* ================================================================ boot */
 $("#today").textContent = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 renderStatus();
 renderWatchlist();
 renderRecent();
-loadConfig().then(() => {
-  if (state.symbol && !$("#analyze-btn").disabled) aiEmpty(state.symbol);
-  if (state.symbol && !state.trade && !$("#trade-btn").disabled) tradeEmpty();
-}).catch(() => {});
+loadConfig().then(() => initAuth(state.cfg)).catch(() => {});
 setRisk(state.risk, { reload: false });
 $$(".deep-toggle").forEach((el) => {
   el.checked = store.get("mp.deep", false);
-  el.addEventListener("change", () => { store.set("mp.deep", el.checked); $$(".deep-toggle").forEach((o) => (o.checked = el.checked)); });
+  el.addEventListener("change", () => { store.set("mp.deep", el.checked); $$(".deep-toggle").forEach((o) => (o.checked = el.checked)); schedulePrefsSync(); });
 });
 $("#levels-btn").classList.toggle("on", state.showLevels);
 $("#ext-btn").classList.toggle("on", state.showExt);
