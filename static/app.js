@@ -568,6 +568,7 @@ async function loadCalendar() {
     const cal = await withRetry(() => api(`/api/calendar?days=7&symbols=${encodeURIComponent(state.watchlist.join(","))}`));
     state.cal = cal;
     renderCalendar();
+    renderUpNext();
   } catch {
     if (!state.cal) $("#cal-body").innerHTML = `<div class="cal-empty">Calendar unavailable right now. <button class="link-btn" onclick="loadCalendar()">Retry</button></div>`;
   }
@@ -663,6 +664,47 @@ $("#cal-body").addEventListener("click", (e) => {
   else row.insertAdjacentHTML("afterend", `<div class="cal-desc">${esc(row.dataset.desc)}</div>`);
 });
 
+// Sidebar "Up next": the next two releases / watchlist earnings, visible on every page.
+function upcomingItems() {
+  const now = Date.now();
+  const econ = (state.cal?.economic || []).map((e) => ({
+    kind: e.tier, at: etDate(e.datetime), title: e.event,
+    sub: `${dayLabel(e.date).split(" · ")[0]} · ${fmtEtTime(e.time)} ET`,
+  }));
+  // Earnings have no exact time: pre-market ≈ 8:00 AM, after-hours ≈ 4:05 PM ET.
+  const earn = (state.cal?.earnings || []).filter((e) => e.watch).map((e) => ({
+    kind: "earnings", sym: e.symbol,
+    at: etDate(`${e.date}T${e.time === "pre-market" ? "08:00" : e.time === "after-hours" ? "16:05" : "12:00"}`),
+    title: `${e.symbol} earnings`,
+    sub: `${dayLabel(e.date).split(" · ")[0]} · ${e.time === "pre-market" ? "before open" : e.time === "after-hours" ? "after close" : "time TBA"}`,
+  }));
+  const upcoming = [...econ, ...earn].filter((x) => x.at > now - 5 * 6e4).sort((a, b) => a.at - b.at);
+  // Show the soonest item, plus the next critical release (or watchlist earnings) if the soonest isn't one.
+  const first = upcoming[0];
+  if (!first) return [];
+  const second = first.kind === "major" ? upcoming.find((x) => x.kind !== "major") || upcoming[1] : upcoming[1];
+  return second ? [first, second] : [first];
+}
+
+function renderUpNext() {
+  const el = $("#upnext");
+  const items = upcomingItems();
+  if (!items.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="un-head"><span>Up next</span><span>Calendar →</span></div>` + items.map((x) => `
+    <div class="un-item ${x.kind}" ${x.sym ? `data-sym="${esc(x.sym)}"` : ""} title="${esc(x.title)}">
+      <i></i><div style="min-width:0"><b>${esc(x.title)}</b><small>${esc(x.sub)}</small></div>
+      <span class="cd">${countdown(x.at - Date.now())}</span>
+    </div>`).join("");
+}
+$("#upnext").addEventListener("click", (e) => {
+  document.body.classList.remove("nav-open");
+  const sym = e.target.closest("[data-sym]")?.dataset.sym;
+  if (sym) return go(sym);
+  go("");
+  setTimeout(() => $("#cal-card")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+});
+
 // Stock page: flag an upcoming earnings report.
 async function loadNextEarnings(symbol) {
   const el = $("#q-earn");
@@ -735,6 +777,7 @@ function toggleWatch(sym) {
   renderStar();
   renderWatchlist();
   if (adding) refreshWatchlist(true);
+  loadCalendar(); // watchlist earnings feed the calendar and "Up next"
   toast(adding ? `${sym} added to watchlist` : `${sym} removed from watchlist`, false);
 }
 function renderStar() {
@@ -1661,8 +1704,8 @@ refreshWatchlist(true);
 route();
 
 setInterval(renderStatus, 30000);
-setInterval(() => { if (!state.symbol && state.cal) renderCalendarNext(); }, 30000);
-setInterval(() => { if (!state.symbol) loadCalendar(); }, 15 * 60000);
+setInterval(() => { if (state.cal) { renderUpNext(); if (!state.symbol) renderCalendarNext(); } }, 30000);
+setInterval(loadCalendar, 15 * 60000); // also feeds the sidebar "Up next" on every page
 setInterval(() => { if (state.symbol && state.positions?.length && marketStatus().key === "open") evaluatePositions(); }, 30000);
 setInterval(() => { if (!state.symbol) loadIndices(); }, 20000);
 setInterval(() => refreshWatchlist(false), 10000);
