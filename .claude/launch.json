@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "maru-pulse",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": [
+        "app.main:app",
+        "--port",
+        "8000",
+        "--reload",
+        "--timeout-graceful-shutdown",
+        "3"
+      ],
+      "port": 8000
+    }
+  ]
+}

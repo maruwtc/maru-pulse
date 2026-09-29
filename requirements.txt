@@ -1,0 +1,7 @@
+openbb>=4.7
+openbb-yfinance
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv
+certifi
