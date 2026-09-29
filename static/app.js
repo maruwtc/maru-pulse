@@ -316,7 +316,11 @@ function applyTick(t) {
 
 /* ================================================================ stock view */
 function setAvatar(sym) {
-  $("#q-avatar").outerHTML = avatar(sym).replace('class="avatar"', 'class="avatar" id="q-avatar"');
+  const tpl = document.createElement("template");
+  tpl.innerHTML = avatar(sym);
+  const el = tpl.content.firstElementChild;
+  el.id = "q-avatar";
+  $("#q-avatar").replaceWith(el);
 }
 
 function renderQuote(q) {
@@ -632,7 +636,7 @@ $("#scrim").addEventListener("click", () => document.body.classList.remove("nav-
 
 /* ================================================================ search palette */
 const palette = $("#palette"), input = $("#search-input"), list = $("#search-results");
-let searchTimer, searchSel = 0, searchReq = 0;
+let searchTimer, searchSel = 0, searchReq = 0, listFor = "";
 
 function openPalette() {
   palette.hidden = false;
@@ -651,6 +655,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 function renderOptions(items, q) {
+  listFor = q;
   let groups;
   if (!q) {
     const recent = state.recent.map((s) => [s, (state.wlQuotes[s] || {}).name || "Recently viewed"]);
@@ -688,10 +693,28 @@ input.addEventListener("keydown", (e) => {
     if (n) searchSel = (searchSel + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
     highlight();
   } else if (e.key === "Enter") {
-    const sym = $(`.opt[data-i="${searchSel}"]`, list)?.dataset.sym || input.value.trim().toUpperCase();
+    e.preventDefault();
+    const q = input.value.trim();
+    if (q && listFor !== q) return submitSearch(q); // results for this text haven't arrived yet
+    const sym = $(`.opt[data-i="${searchSel}"]`, list)?.dataset.sym || q.toUpperCase();
     if (sym) { closePalette(); go(sym); }
   }
 });
+// Enter pressed before results loaded: search now and open the best match
+// (an exact ticker match wins, else the top result, else the text as a ticker).
+async function submitSearch(q) {
+  clearTimeout(searchTimer);
+  const req = ++searchReq;
+  list.innerHTML = `<li class="none">Searching “${esc(q)}”…</li>`;
+  const items = await api(`/api/search?q=${encodeURIComponent(q)}`).catch(() => []);
+  if (req !== searchReq || palette.hidden) return;
+  const exact = items.find((i) => i.symbol === q.toUpperCase());
+  const sym = exact?.symbol || items[0]?.symbol || (/^[A-Za-z.\-^]{1,6}$/.test(q) ? q.toUpperCase() : null);
+  if (!sym) return renderOptions(items, q);
+  closePalette();
+  go(sym);
+}
+
 list.addEventListener("mousemove", (e) => {
   const i = e.target.closest(".opt")?.dataset.i;
   if (i != null && +i !== searchSel) { searchSel = +i; highlight(); }
@@ -1381,7 +1404,9 @@ $("#style-tabs").addEventListener("click", (e) => {
 
 /* ================================================================ routing */
 function go(symbol) {
-  location.hash = symbol ? `#/${encodeURIComponent(symbol.toUpperCase())}` : "#/";
+  const hash = symbol ? `#/${encodeURIComponent(symbol.toUpperCase())}` : "#/";
+  if (location.hash === hash || (hash === "#/" && !location.hash)) route(); // same page: refresh it
+  else location.hash = hash;
 }
 
 async function route() {
