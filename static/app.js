@@ -74,7 +74,7 @@ function avatar(sym, size) {
   const img = /^[A-Za-z0-9.\-]{1,10}$/.test(sym) && !logoMissing.has(sym)
     ? `<img src="/api/logo/${encodeURIComponent(sym)}" alt="" ${logoOk.has(sym) ? "" : `loading="lazy" onload="logoLoaded(this, '${s}')"`} onerror="logoFailed(this, '${s}')">`
     : "";
-  return `<span class="avatar${logoOk.has(sym) ? " logo-ok" : ""}${logoLight.has(sym) ? " logo-light" : ""}" style="background:linear-gradient(135deg,hsl(${h} 65% 52%),hsl(${(h + 40) % 360} 65% 42%));${size ? `width:${size}px;height:${size}px` : ""}"><span class="mono-lbl">${esc(label)}</span>${img}</span>`;
+  return `<span class="avatar${logoOk.has(sym) ? " logo-ok" : ""}${logoLight.has(sym) ? " logo-light" : ""}" style="--h:${h};${size ? `width:${size}px;height:${size}px` : ""}"><span class="mono-lbl">${esc(label)}</span>${img}</span>`;
 }
 
 // Inline SVG sparkline; dashed line marks the reference (previous close).
