@@ -14,6 +14,7 @@
   --accent: #f2f3f5;
   --accent-2: #f2f3f5;
   --accent-soft: rgba(255, 255, 255, .08);
+  --ai: #a78bfa; /* AI Analysis keeps its own violet */
   --up: #16c784;
   --up-soft: rgba(22, 199, 132, .13);
   --down: #f0464f;
@@ -38,6 +39,7 @@
   --accent: #111111;
   --accent-2: #111111;
   --accent-soft: rgba(0, 0, 0, .06);
+  --ai: #7c3aed;
   --up: #0f9d63;
   --up-soft: rgba(15, 157, 99, .1);
   --down: #dc2e3a;
@@ -267,7 +269,10 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .link { color: var(--accent) !important; text-decoration: underline; text-underline-offset: 3px; }
 
 /* AI */
-.ai-card { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--panel)), var(--panel) 160px); }
+.ai-card { border-color: color-mix(in srgb, var(--ai) 35%, var(--border)); background: linear-gradient(180deg, color-mix(in srgb, var(--ai) 6%, var(--panel)), var(--panel) 160px); }
+.ai-card .ai-mark { color: var(--ai); }
+.ai-card .btn.primary { color: var(--ai); border-color: var(--ai); }
+.ai-card .spinner { border-top-color: var(--ai); }
 .ai-title { display: flex; gap: 12px; align-items: center; }
 .ai-mark { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; color: var(--accent); border: 1.5px solid currentColor; }
 .ai-controls { display: flex; gap: 8px; }
@@ -289,7 +294,7 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .ai-output ul { padding-left: 18px; margin: 6px 0; }
 .ai-output li { margin: 3px 0; }
 .ai-output p { margin: 6px 0; }
-.ai-output.streaming > :last-child::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+.ai-output.streaming > :last-child::after { content: "▍"; color: var(--ai); animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .ai-thinking { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 6px 0 12px; }
 .ai-thinking .spinner { width: 16px; height: 16px; border-width: 2px; }
