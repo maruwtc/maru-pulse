@@ -282,12 +282,51 @@ def get_history(symbol: str, rng: str, extended: bool = False) -> dict:
     return cached(f"hist:{symbol}:{rng}:{int(extended)}", 30 if intraday else 600, load)
 
 
+def yahoo_search_news(symbols: list[str], limit: int) -> list[dict]:
+    """Fallback news source: Yahoo's search API (headline, publisher, time; no summary).
+
+    Used when the news endpoint behind OpenBB/yfinance fails (it returns HTTP 500 during outages)."""
+    per = max(5, min(20, -(-limit // len(symbols))))
+    out = []
+    for sym in symbols:
+        try:
+            data = YfData().get_raw_json("https://query1.finance.yahoo.com/v1/finance/search",
+                                         params={"q": sym, "newsCount": per, "quotesCount": 0}, timeout=10)
+        except Exception:
+            continue
+        for n in data.get("news") or []:
+            if not n.get("title") or not n.get("link"):
+                continue
+            ts = n.get("providerPublishTime")
+            out.append({"date": datetime.fromtimestamp(ts, NY).isoformat() if ts else None, "title": n["title"],
+                        "url": n["link"], "source": n.get("publisher"), "symbol": sym, "summary": None})
+    return out
+
+
 def get_news(symbols: str, limit: int) -> list[dict]:
     def load():
-        df = obb_call(obb.news.company, symbols, provider=PROVIDER, limit=limit)
-        df = df.sort_values("date", ascending=False).drop_duplicates("title")
-        cols = [c for c in ("date", "title", "url", "source", "symbol", "summary") if c in df]
-        return records(df[cols])
+        df = None
+        for attempt in range(2):  # Yahoo sometimes returns nothing under a burst of requests
+            try:
+                df = obb_call(obb.news.company, symbols, provider=PROVIDER, limit=limit)
+                break
+            except HTTPException:
+                if attempt == 0:
+                    time.sleep(1)
+        if df is not None:
+            df = df.sort_values("date", ascending=False).drop_duplicates("title")
+            cols = [c for c in ("date", "title", "url", "source", "symbol", "summary") if c in df]
+            return records(df[cols])
+        items = yahoo_search_news([x for x in symbols.split(",") if x], limit)
+        if not items:
+            raise HTTPException(502, "News is temporarily unavailable from Yahoo — try again shortly.")
+        log.info("news for %s served from Yahoo search fallback", symbols)
+        seen, uniq = set(), []
+        for it in sorted(items, key=lambda x: x["date"] or "", reverse=True):
+            if it["title"] not in seen:
+                seen.add(it["title"])
+                uniq.append(it)
+        return uniq[:limit]
 
     return cached(f"news:{symbols}:{limit}", 120, load)
 

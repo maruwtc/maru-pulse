@@ -484,14 +484,32 @@ function newsHTML(items, { feature = false, showSym = false } = {}) {
 }
 const skeleton = (n = 5) => Array.from({ length: n }, () => `<div style="padding:12px 0"><div class="sk-line" style="width:85%"></div><div class="sk-line" style="width:60%"></div></div>`).join("");
 
+// Retry transient data-source failures a few times with backoff before showing an error.
+async function withRetry(fn, { tries = 3, onRetry } = {}) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (i >= tries - 1) throw e;
+      onRetry?.(i + 1);
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+}
+
 async function loadMarketNews() {
   const sym = state.newsSym;
-  if (!$("#market-news").children.length) $("#market-news").innerHTML = skeleton(6);
+  const box = $("#market-news");
+  const hadNews = !!box.querySelector(".news-item, .news-feature");
+  if (!box.children.length) box.innerHTML = skeleton(6);
   try {
-    const items = await api(`/api/news/${encodeURIComponent(sym)}?limit=${sym.includes(",") ? 30 : 20}`);
-    if (sym === state.newsSym) $("#market-news").innerHTML = newsHTML(items, { feature: true, showSym: sym.includes(",") });
+    const items = await withRetry(
+      () => api(`/api/news/${encodeURIComponent(sym)}?limit=${sym.includes(",") ? 30 : 20}`),
+      { onRetry: () => { if (!hadNews && sym === state.newsSym) box.innerHTML = skeleton(6); } },
+    );
+    if (sym === state.newsSym) box.innerHTML = newsHTML(items, { feature: true, showSym: sym.includes(",") });
   } catch (e) {
-    $("#market-news").innerHTML = `<div class="err">Couldn't load news — ${esc(e.message)}</div>`;
+    if (sym !== state.newsSym || hadNews) return; // keep the stories already on screen
+    box.innerHTML = `<div class="err">Couldn't load news right now — the data source is busy.</div>
+      <button class="btn" style="margin-top:10px" onclick="loadMarketNews()">Try again</button>`;
   }
 }
 $("#news-filter").addEventListener("click", (e) => {
@@ -507,7 +525,7 @@ async function loadStockNews(symbol) {
   $("#stock-news-title").textContent = `${symbol} News`;
   $("#stock-news").innerHTML = skeleton(6);
   try {
-    const items = await api(`/api/news/${symbol}?limit=20`);
+    const items = await withRetry(() => api(`/api/news/${symbol}?limit=20`), { tries: 2 });
     if (symbol === state.symbol) $("#stock-news").innerHTML = newsHTML(items);
   } catch {
     if (symbol === state.symbol) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">No news found for ${esc(symbol)}.</div>`;
