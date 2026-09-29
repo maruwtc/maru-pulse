@@ -532,6 +532,152 @@ async function loadStockNews(symbol) {
   }
 }
 
+/* ================================================================ market calendar */
+// Calendar times are naive New York times ("2026-10-01T08:30:00"); convert to a real instant.
+function etDate(iso) {
+  const [d, t = "00:00"] = iso.split("T");
+  const [y, m, dd] = d.split("-").map(Number);
+  const [h, mi] = t.split(":").map(Number);
+  const guess = Date.UTC(y, m - 1, dd, h, mi);
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(new Date(guess)).map((x) => [x.type, x.value]));
+  const asNy = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute);
+  return new Date(guess - (asNy - guess));
+}
+const nyToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+function dayLabel(dateStr) {
+  const today = nyToday();
+  const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(Date.now() + 864e5));
+  const pretty = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return dateStr === today ? `Today · ${pretty}` : dateStr === tomorrow ? `Tomorrow · ${pretty}` : pretty;
+}
+const fmtEtTime = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+function countdown(ms) {
+  if (ms <= 0) return "now";
+  const m = Math.floor(ms / 6e4), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+state.cal = null;
+state.calTab = store.get("mp.calTab", "economy");
+state.calFilter = store.get("mp.calFilter", "all");
+
+async function loadCalendar() {
+  if (!state.cal) $("#cal-body").innerHTML = skeleton(4);
+  try {
+    const cal = await withRetry(() => api(`/api/calendar?days=7&symbols=${encodeURIComponent(state.watchlist.join(","))}`));
+    state.cal = cal;
+    renderCalendar();
+  } catch {
+    if (!state.cal) $("#cal-body").innerHTML = `<div class="cal-empty">Calendar unavailable right now. <button class="link-btn" onclick="loadCalendar()">Retry</button></div>`;
+  }
+}
+
+function econRows() {
+  const evs = state.cal?.economic || [];
+  return state.calFilter === "critical" ? evs.filter((e) => e.tier === "critical") : evs;
+}
+
+function renderCalendarNext() {
+  const now = Date.now();
+  const next = (state.cal?.economic || []).find((e) => e.tier === "critical" && etDate(e.datetime) > now - 5 * 6e4);
+  if (!next) return ($("#cal-next").innerHTML = "");
+  // Several critical releases often share a slot (e.g. GDP + Core PCE at 8:30 AM).
+  const same = state.cal.economic.filter((e) => e.tier === "critical" && e.datetime === next.datetime);
+  const v = next.values?.[0] || {};
+  const bits = same.length > 1 ? "" : [v.consensus && `Consensus ${v.consensus}`, v.previous && `Prev ${v.previous}`].filter(Boolean).join(" · ");
+  $("#cal-next").innerHTML = `<div class="cal-next"><span class="pulse"></span>
+    <div class="what"><b>Next critical: ${same.map((e) => esc(e.event)).join(" + ")}</b><span>${dayLabel(next.date)} · ${fmtEtTime(next.time)} ET${bits ? ` · ${esc(bits)}` : ""}</span></div>
+    <div class="count">${countdown(etDate(next.datetime) - now)}<small>to release</small></div></div>`;
+}
+
+function renderCalendar() {
+  const cal = state.cal;
+  if (!cal) return;
+  const econ = econRows(), earn = cal.earnings || [];
+  $$("#cal-tabs button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === state.calTab);
+    const n = b.dataset.tab === "economy" ? econ.length : earn.length;
+    b.innerHTML = `${b.dataset.tab === "economy" ? "Economy" : "Earnings"}<span class="n">${n}</span>`;
+  });
+  $$("#cal-filter button").forEach((b) => b.classList.toggle("active", b.dataset.f === state.calFilter));
+  $("#cal-filter").hidden = state.calTab !== "economy";
+  renderCalendarNext();
+
+  const byDay = (rows) => rows.reduce((m, r) => ((m[r.date] ||= []).push(r), m), {});
+  const today = nyToday();
+  let html = "";
+  if (state.calTab === "economy") {
+    const days = byDay(econ);
+    for (const [date, rows] of Object.entries(days)) {
+      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${rows.length} event${rows.length > 1 ? "s" : ""}</span></div>`;
+      html += rows.map((e) => {
+        const past = etDate(e.datetime) < Date.now();
+        const vals = e.values || [];
+        const join = (k) => vals.map((v) => v[k]).filter(Boolean).join(" · ");
+        const act = join("actual"), cons = join("consensus"), prev = join("previous");
+        return `<div class="cal-row ${past ? "past" : ""}" data-desc="${esc(e.description || "")}">
+          <span class="tm">${fmtEtTime(e.time)}</span>
+          <span class="ev"><span class="tier ${e.tier}">${e.tier === "critical" ? "CRITICAL" : "MAJOR"}</span><b title="${esc(e.event)}">${esc(e.event)}</b></span>
+          <span class="cal-vals">${act ? `<span class="v act"><small>Actual</small>${esc(act)}</span>` : ""}<span class="v"><small>Cons.</small>${esc(cons || "—")}</span><span class="v"><small>Prev.</small>${esc(prev || "—")}</span></span>
+        </div>`;
+      }).join("");
+    }
+    if (!econ.length) html = `<div class="cal-empty">No ${state.calFilter === "critical" ? "critical" : "major"} US releases in the next 7 days.</div>`;
+  } else {
+    const timeLbl = (t) => (t === "pre-market" ? "☀ Before open" : t === "after-hours" ? "☾ After close" : "Time TBA");
+    for (const [date, rows] of Object.entries(byDay(earn))) {
+      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${rows.length} report${rows.length > 1 ? "s" : ""}</span></div>`;
+      html += rows.map((e) => `<div class="cal-row earn-row" data-sym="${esc(e.symbol)}">
+          ${avatar(e.symbol, 30)}
+          <span style="min-width:0"><b class="mono">${esc(e.symbol)}</b> ${e.watch ? `<span class="star" title="On your watchlist">★</span>` : ""}<div class="nm">${esc(e.name || "")}</div></span>
+          <span class="cal-vals"><span class="earn-time">${timeLbl(e.time)}</span><span class="v"><small>EPS est.</small>${e.eps_consensus != null ? fmt(e.eps_consensus) : "—"}</span><span class="v"><small>Mkt cap</small>${big(e.market_cap)}</span></span>
+        </div>`).join("");
+    }
+    if (!earn.length) html = `<div class="cal-empty">No major earnings (≥ $50B) or watchlist reports in the next 7 days.</div>`;
+  }
+  $("#cal-body").innerHTML = html;
+}
+
+$("#cal-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.calTab = b.dataset.tab;
+  store.set("mp.calTab", state.calTab);
+  renderCalendar();
+});
+$("#cal-filter").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.calFilter = b.dataset.f;
+  store.set("mp.calFilter", state.calFilter);
+  renderCalendar();
+});
+$("#cal-body").addEventListener("click", (e) => {
+  const sym = e.target.closest(".earn-row")?.dataset.sym;
+  if (sym) return go(sym);
+  const row = e.target.closest(".cal-row");
+  if (!row || !row.dataset.desc) return;
+  const open = row.nextElementSibling?.classList.contains("cal-desc");
+  if (open) row.nextElementSibling.remove();
+  else row.insertAdjacentHTML("afterend", `<div class="cal-desc">${esc(row.dataset.desc)}</div>`);
+});
+
+// Stock page: flag an upcoming earnings report.
+async function loadNextEarnings(symbol) {
+  const el = $("#q-earn");
+  el.hidden = true;
+  try {
+    const e = await api(`/api/next-earnings/${symbol}`);
+    if (symbol !== state.symbol || !e.date) return;
+    const days = Math.round((new Date(e.date + "T12:00:00") - new Date(nyToday() + "T12:00:00")) / 864e5);
+    const when = days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+    const t = e.time === "pre-market" ? "before the open" : e.time === "after-hours" ? "after the close" : "";
+    el.innerHTML = `📅 Earnings ${when} · ${new Date(e.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${t ? ` ${t}` : ""}${e.eps_consensus != null ? ` · EPS est. ${fmt(e.eps_consensus)}` : ""}`;
+    el.hidden = false;
+  } catch {}
+}
+
 /* ================================================================ home: indices + movers */
 async function loadIndices() {
   try {
@@ -1468,6 +1614,7 @@ async function route() {
   loadPositionsFor(symbol);
   loadStockNews(symbol);
   loadOverview(symbol);
+  loadNextEarnings(symbol);
   loadHistory();
   try {
     let q;
@@ -1507,12 +1654,15 @@ $$(".deep-toggle").forEach((el) => {
 $("#levels-btn").classList.toggle("on", state.showLevels);
 $("#ext-btn").classList.toggle("on", state.showExt);
 loadIndices();
+loadCalendar();
 loadMarketNews();
 loadMovers();
 refreshWatchlist(true);
 route();
 
 setInterval(renderStatus, 30000);
+setInterval(() => { if (!state.symbol && state.cal) renderCalendarNext(); }, 30000);
+setInterval(() => { if (!state.symbol) loadCalendar(); }, 15 * 60000);
 setInterval(() => { if (state.symbol && state.positions?.length && marketStatus().key === "open") evaluatePositions(); }, 30000);
 setInterval(() => { if (!state.symbol) loadIndices(); }, 20000);
 setInterval(() => refreshWatchlist(false), 10000);

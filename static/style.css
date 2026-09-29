@@ -275,6 +275,44 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
 .err { color: var(--down); }
 
 
+
+/* ------------------------------------------------------------ market calendar */
+.home-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.cal-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cal-controls .seg button .n { font: 600 10.5px "JetBrains Mono", monospace; margin-left: 5px; padding: 0 5px; border-radius: 5px; background: var(--hover); color: var(--muted); }
+.cal-controls .seg button.active .n { background: var(--accent-soft); color: var(--accent); }
+.cal-next { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px; border-radius: 12px; background: linear-gradient(90deg, var(--down-soft), transparent 80%); border: 1px solid color-mix(in srgb, var(--down) 30%, var(--border)); }
+.cal-next .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--down); flex: none; animation: breathe-red 1.8s infinite; }
+@keyframes breathe-red { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--down) 60%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+.cal-next .what { flex: 1; min-width: 0; }
+.cal-next .what b { display: block; font-size: 14px; }
+.cal-next .what span { font-size: 12px; color: var(--text-2); }
+.cal-next .count { font: 700 18px "JetBrains Mono", monospace; white-space: nowrap; }
+.cal-next .count small { display: block; font: 500 10px Inter, sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; text-align: right; }
+.cal-body { max-height: 420px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.cal-day { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; padding: 8px 2px 6px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--panel); border-bottom: 1px solid var(--border); }
+.cal-day.today { color: var(--accent); }
+.cal-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 6px; }
+.cal-row:hover { background: var(--hover); }
+.cal-row.past { opacity: .6; }
+.cal-row .tm { font: 500 12px "JetBrains Mono", monospace; color: var(--text-2); }
+.cal-row .ev { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cal-row .ev b { font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tier { flex: none; font: 700 9.5px Inter, sans-serif; letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; }
+.tier.critical { background: var(--down-soft); color: var(--down); }
+.tier.major { background: rgba(245,165,36,.13); color: var(--warn); }
+.cal-vals { display: flex; gap: 14px; font: 500 12px "JetBrains Mono", monospace; white-space: nowrap; }
+.cal-vals .v { display: flex; flex-direction: column; align-items: flex-end; min-width: 52px; }
+.cal-vals .v small { font: 600 9.5px Inter, sans-serif; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.cal-vals .v.act { color: var(--text); font-weight: 700; }
+.cal-desc { grid-column: 1 / -1; font-size: 12.5px; color: var(--text-2); line-height: 1.5; padding: 2px 0 4px 74px; }
+.cal-empty { padding: 22px 8px; text-align: center; color: var(--muted); }
+.earn-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.earn-row .nm { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.earn-time { font: 600 11px Inter, sans-serif; padding: 2px 7px; border-radius: 5px; background: var(--hover); color: var(--text-2); white-space: nowrap; }
+.earn-row .star { color: var(--warn); font-size: 12px; }
+.earn-chip { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 4px 10px; border-radius: 8px; font-size: 12.5px; font-weight: 500; background: rgba(245,165,36,.12); color: var(--warn); border: 1px solid rgba(245,165,36,.3); }
+
 /* ------------------------------------------------------------ extended hours */
 .ext-line { display: inline-flex; align-items: center; gap: 8px; margin-top: 6px; padding: 4px 10px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border); font-size: 12.5px; }
 .ext-line .i { width: 14px; height: 14px; color: var(--muted); }
@@ -507,6 +545,11 @@ select { height: 36px; background: var(--panel-2); color: var(--text); border: 1
   .card-head .seg { overflow-x: auto; max-width: 100%; }
 }
 @media (max-width: 520px) {
+  .cal-row { grid-template-columns: 52px minmax(0, 1fr); }
+  .cal-vals { grid-column: 2; gap: 10px; }
+  .cal-vals .v { align-items: flex-start; min-width: 0; }
+  .cal-desc { padding-left: 0; }
+  .cal-next .count { font-size: 15px; }
   .ai-empty, .about-facts { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: minmax(0, 1fr); }
   .signals { grid-template-columns: minmax(0, 1fr); }

@@ -1,5 +1,9 @@
 openbb>=4.7
 openbb-yfinance
+# Keyless economic + earnings calendars. openbb-nasdaq 2.x pulls openbb-core 2.x, which the other
+# OpenBB 4.x extensions don't support yet, so stay on the 1.x line.
+openbb-nasdaq<2.0.0
+openbb-core<2.0.0
 fastapi
 uvicorn[standard]
 httpx
