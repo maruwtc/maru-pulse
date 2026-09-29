@@ -802,6 +802,7 @@ function renderStar() {
 $("#star-btn").addEventListener("click", () => state.symbol && toggleWatch(state.symbol));
 
 function renderWatchlist() {
+  if (wlDragging) return; // don't re-render (e.g. the 10s price refresh) mid-drag
   $("#wl-count").textContent = state.watchlist.length || "";
   if (!state.watchlist.length) {
     $("#watchlist").innerHTML = `<li class="wl-empty">Your watchlist is empty. Open a stock and tap <b>☆ Watch</b> to track it here.</li>`;
@@ -830,7 +831,40 @@ async function refreshWatchlist(withSparks = false) {
     renderWatchlist();
   } catch {}
 }
+// Drag to reorder (mouse + touch). Order is saved to the account when signed in, else locally.
+let wlDragging = false, wlDragEndedAt = 0;
+if (window.Sortable) {
+  Sortable.create($("#watchlist"), {
+    draggable: ".wl-item",
+    filter: ".rm",
+    preventOnFilter: false,
+    animation: 160,
+    delay: 180,
+    delayOnTouchOnly: true, // long-press on phones so the list still scrolls
+    ghostClass: "dragging-ghost",
+    chosenClass: "dragging-chosen",
+    dragClass: "dragging-drag",
+    onStart: () => { wlDragging = true; $("#watchlist").classList.add("sorting"); },
+    onEnd: (evt) => {
+      wlDragging = false;
+      wlDragEndedAt = Date.now();
+      $("#watchlist").classList.remove("sorting");
+      if (evt.oldIndex === evt.newIndex) return;
+      saveWatchlistOrder($$("#watchlist .wl-item").map((li) => li.dataset.sym));
+    },
+  });
+}
+async function saveWatchlistOrder(order) {
+  state.watchlist = order;
+  renderWatchlist();
+  if (!state.user) return store.set("mp.watchlist", order);
+  const { error } = await sb.from("watchlist_items")
+    .upsert(order.map((symbol, i) => ({ user_id: state.user.id, symbol, sort_order: i })));
+  if (error) toast(`Couldn't save watchlist order: ${error.message}`);
+}
+
 $("#watchlist").addEventListener("click", (e) => {
+  if (Date.now() - wlDragEndedAt < 300) return; // a drop isn't a click
   const rm = e.target.closest("[data-rm]")?.dataset.rm;
   if (rm) { e.stopPropagation(); return toggleWatch(rm); }
   const s = e.target.closest(".wl-item")?.dataset.sym;
