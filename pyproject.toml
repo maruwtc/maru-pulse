@@ -1,4 +1,21 @@
-# Dependencies live in requirements.txt; this file only configures the Vercel deployment.
+# Vercel installs from this file (uv). Keep dependencies in sync with requirements.txt (local dev).
+[project]
+name = "maru-pulse"
+version = "0.1.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "openbb>=4.7",
+    "openbb-yfinance",
+    # openbb-nasdaq 2.x pulls openbb-core 2.x, which the other OpenBB 4.x extensions don't support yet.
+    "openbb-nasdaq<2.0.0",
+    "openbb-core<2.0.0",
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "python-dotenv",
+    "certifi",
+]
+
 [tool.vercel]
 entrypoint = "app.main:app"
 
