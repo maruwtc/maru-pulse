@@ -7,6 +7,13 @@ import certifi
 # python.org macOS builds ship without a CA bundle; SEC search needs one.
 os.environ.setdefault("SSL_CERT_FILE", certifi.where())
 
+# On Vercel only /tmp is writable: OpenBB settings and yfinance's cache live under $HOME, and
+# OpenBB's extension package is prebuilt at deploy time (vercel_build.py), so never rebuild it here.
+ON_VERCEL = bool(os.getenv("VERCEL"))
+if ON_VERCEL:
+    os.environ["HOME"] = "/tmp"
+    os.environ.setdefault("OPENBB_AUTO_BUILD", "false")
+
 import asyncio
 import logging
 import threading
@@ -1250,7 +1257,7 @@ def calendar_context(symbol: str) -> str:
 
 # ---------------------------------------------------------------- company logos
 
-LOGO_DIR = ROOT / ".cache" / "logos"
+LOGO_DIR = (Path("/tmp") if ON_VERCEL else ROOT / ".cache") / "logos"
 LOGO_SOURCES = (
     "https://financialmodelingprep.com/image-stock/{symbol}.png",
     "https://assets.parqet.com/logos/symbol/{symbol}?format=png",
