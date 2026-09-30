@@ -37,6 +37,22 @@ def bs_delta(S, K, T, sigma, kind, r=RISK_FREE):
     return norm_cdf(d1) if kind == "call" else norm_cdf(d1) - 1
 
 
+def implied_vol(price, S, K, T, kind, r=RISK_FREE):
+    """Black-Scholes implied volatility by bisection; None when the price is outside no-arbitrage bounds."""
+    if not (price > 0 and S > 0 and K > 0 and T > 0):
+        return None
+    lo, hi = 0.01, 5.0
+    if not bs_price(S, K, T, lo, kind, r) < price < bs_price(S, K, T, hi, kind, r):
+        return None
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if bs_price(S, K, T, mid, kind, r) < price:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
 def bs_theta(S, K, T, sigma, kind, r=RISK_FREE):
     """Theta per calendar day (per share)."""
     if T <= 0 or sigma <= 0:
@@ -143,8 +159,15 @@ def clean_chain(df: pd.DataFrame, spot: float) -> pd.DataFrame:
     df["mid"] = np.where(df["quoted"], (bid + ask) / 2, df["last_trade_price"].fillna(0))
     df = df[df["mid"] > 0]
     df["spread_pct"] = np.where(df["quoted"], (df["ask"] - df["bid"]) / df["mid"], np.nan)
-    df["iv"] = df["implied_volatility"].where((df["implied_volatility"] > 0.03) & (df["implied_volatility"] < 3))
     df["T"] = df["dte"].clip(lower=0.5) / 365
+    # Yahoo's IV is only trustworthy with a live quote; off-hours it reports placeholders
+    # (1e-5, 0.0625, 0.25, ...). Otherwise back IV out of the option's own price.
+    yahoo = df["implied_volatility"].where(df["quoted"] & (df["implied_volatility"] > 0.03) & (df["implied_volatility"] < 3))
+    implied = pd.Series([
+        v if (v := implied_vol(m, spot, k, t, kind)) is not None else np.nan
+        for m, k, t, kind in zip(df["mid"], df["strike"], df["T"], df["option_type"])
+    ], index=df.index, dtype=float)
+    df["iv"] = yahoo.fillna(implied.where((implied > 0.03) & (implied < 3)))
     df["delta"] = [
         bs_delta(spot, k, t, iv, kind) if iv == iv else None
         for k, t, iv, kind in zip(df["strike"], df["T"], df["iv"], df["option_type"])
@@ -316,7 +339,13 @@ def strategy_metrics(legs: list[dict], spot: float, fallback_iv: float | None) -
     mids = (pnl[:-1] + pnl[1:]) / 2
     pop = float(np.sum(np.diff(cdf)[mids > 0]))
 
+    # Chart ±2.5σ around spot, but always wide enough to show every strike and breakeven.
     lo, hi = spot * math.exp(-2.5 * sd), spot * math.exp(2.5 * sd)
+    marks = [l["strike"] for l in opts] + [b for b in breakevens if spot / 3 < b < spot * 3]
+    if marks:
+        pad = max(max(marks) - min(marks), spot * 0.02) * 0.25
+        lo, hi = min(lo, min(marks) - pad), max(hi, max(marks) + pad)
+    lo, hi = max(min(lo, spot * 0.95), 0.01), max(hi, spot * 1.05)
     pts = np.linspace(lo, hi, 80)
     curve = [[r2(S), r2(float(np.interp(S, grid, pnl)))] for S in pts]
     return {
