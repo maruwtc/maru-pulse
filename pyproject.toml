@@ -1,6 +1,0 @@
-# Dependencies live in requirements.txt; this file only configures the Vercel deployment.
-[tool.vercel]
-entrypoint = "app.main:app"
-
-[tool.vercel.scripts]
-build = "python vercel_build.py"
