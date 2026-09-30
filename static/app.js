@@ -100,7 +100,7 @@ const INDEX_META = { SPY: "S&P 500", QQQ: "Nasdaq 100", DIA: "Dow Jones", IWM: "
 const POPULAR = [["AAPL", "Apple Inc."], ["NVDA", "NVIDIA Corporation"], ["MSFT", "Microsoft Corporation"], ["TSLA", "Tesla, Inc."], ["AMZN", "Amazon.com, Inc."], ["META", "Meta Platforms, Inc."], ["GOOGL", "Alphabet Inc."]];
 
 const state = {
-  symbol: null, range: "1D", style: "area", bars: [], intraday: true, prevClose: null, lastPrice: null, quote: null,
+  symbol: null, range: "1D", style: store.get("mp.style", "hollow"), tf: store.get("mp.tf", { "1D": 5, "5D": 15 }), bars: [], rawBars: [], intraday: true, prevClose: null, lastPrice: null, quote: null,
   source: null, movers: null, moverKind: "gainers", newsSym: "SPY,QQQ,DIA,IWM",
   watchlist: store.get("mp.watchlist", ["AAPL", "NVDA", "MSFT", "TSLA", "AMZN"]),
   recent: store.get("mp.recent", []),
@@ -154,7 +154,7 @@ function chartTheme() {
     },
   };
 }
-// Mouse wheel scrolls the page, not the chart; drag to pan, pinch to zoom.
+// Built-in wheel handling is off (see chartWheel below); drag to pan, touch-pinch to zoom.
 const chart = LightweightCharts.createChart($("#chart"), {
   autoSize: true, ...chartTheme(),
   handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -175,8 +175,8 @@ function renderChart(fit = true) {
   const up = bars[bars.length - 1].close >= base;
   const upC = css("--up"), downC = css("--down"), color = up ? upC : downC;
   if (priceSeries) { chart.removeSeries(priceSeries); levelLines = []; }
-  priceSeries = state.style === "candle"
-    ? chart.addCandlestickSeries({ upColor: upC, downColor: downC, borderVisible: false, wickUpColor: upC, wickDownColor: downC })
+  priceSeries = state.style !== "area"
+    ? chart.addCandlestickSeries({ upColor: upC, downColor: downC, borderVisible: state.style === "hollow", borderUpColor: upC, borderDownColor: downC, wickUpColor: upC, wickDownColor: downC })
     : chart.addAreaSeries({ lineColor: color, topColor: color + "40", bottomColor: color + "00", lineWidth: 2, crosshairMarkerRadius: 4 });
   if (state.range === "1D" && state.prevClose) {
     // Keep the previous-close reference line inside the visible price range.
@@ -189,20 +189,143 @@ function renderChart(fit = true) {
     });
   }
   const extC = css("--muted");
-  priceSeries.setData(bars.map((b) => {
-    if (state.style === "candle") return b.ext ? { ...b, color: extC, wickColor: extC, borderColor: extC } : b;
-    return b.ext ? { time: b.time, value: b.close, lineColor: extC, topColor: extC + "22", bottomColor: extC + "00" } : { time: b.time, value: b.close };
-  }));
+  priceSeries.setData(bars.map((b, i) => seriesPoint(b, bars[i - 1])));
   if (state.range === "1D" && state.prevClose) {
     priceSeries.createPriceLine({ price: state.prevClose, color: css("--muted"), lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "Prev close" });
   }
   drawLevels();
   volSeries.setData(bars.map((b) => ({ time: b.time, value: b.volume || 0, color: b.ext ? extC + "44" : (b.close >= b.open ? upC : downC) + "55" })));
   chart.timeScale().applyOptions({ timeVisible: state.intraday, secondsVisible: false });
-  if (fit) requestAnimationFrame(() => chart.timeScale().fitContent());
+  if (fit) requestAnimationFrame(() => fitChart());
   renderRangeReturn();
   setLegend(null);
 }
+
+// One price-series point per bar. Hollow candles (TradingView style): colour follows
+// close vs the previous close; the body is hollow when close > open.
+function seriesPoint(b, prev) {
+  const extC = css("--muted");
+  if (state.style === "area") {
+    return b.ext ? { time: b.time, value: b.close, lineColor: extC, topColor: extC + "22", bottomColor: extC + "00" } : { time: b.time, value: b.close };
+  }
+  const bar = { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+  if (state.style === "candle") return b.ext ? { ...bar, color: extC, wickColor: extC, borderColor: extC } : bar;
+  const c = b.ext ? extC : b.close >= (prev ? prev.close : b.open) ? css("--up") : css("--down");
+  // Fill hollow bodies with the panel colour so the wick doesn't show through them.
+  return { ...bar, color: b.close > b.open ? css("--panel") : c, borderColor: c, wickColor: c };
+}
+
+// Show the whole range when candles stay readable; otherwise zoom to the latest
+// bars at a readable width (drag to pan back, drag the price/time axis to zoom).
+const MIN_BAR_PX = 7;
+function fitChart(tries = 0) {
+  const ts = chart.timeScale(), n = state.bars.length, w = ts.width();
+  if (!w) return void (tries < 20 && setTimeout(() => fitChart(tries + 1), 50)); // not laid out yet
+  if (n * MIN_BAR_PX <= w) return ts.fitContent();
+  const shown = Math.floor(w / MIN_BAR_PX);
+  ts.setVisibleLogicalRange({ from: n - shown, to: n + 2 });
+}
+
+// Intraday ranges can be viewed at coarser bar intervals than the API returns
+// (1D ships 1m bars, 5D ships 5m); aggregate client-side.
+const TF_OPTIONS = { "1D": [1, 2, 5, 15], "5D": [5, 15, 30] };
+const tfMinutes = () => (TF_OPTIONS[state.range] ? state.tf[state.range] || TF_OPTIONS[state.range][0] : 0);
+const bucketOf = (t, min) => Math.floor(t / (min * 60)) * min * 60;
+function aggregate(raw) {
+  const min = tfMinutes();
+  if (!min || min === TF_OPTIONS[state.range][0]) return raw.map((b) => ({ ...b }));
+  const out = [];
+  for (const b of raw) {
+    const t = bucketOf(b.time, min), last = out[out.length - 1];
+    if (last && last.time === t) {
+      last.high = Math.max(last.high, b.high);
+      last.low = Math.min(last.low, b.low);
+      last.close = b.close;
+      last.volume = (last.volume || 0) + (b.volume || 0);
+    } else out.push({ ...b, time: t });
+  }
+  return out;
+}
+// Intraday feeds carry stray bad prints (e.g. a 1m after-hours wick 6% below price) that
+// stretch the price scale and flatten everything else. Cap each wick at 10x the median bar range.
+function clipWicks(bars) {
+  if (!state.intraday || bars.length < 20) return bars;
+  const ranges = bars.map((b) => b.high - b.low).sort((a, b) => a - b);
+  const cap = 10 * (ranges[ranges.length >> 1] || 0);
+  if (!cap) return bars;
+  return bars.map((b) => {
+    const hi = Math.max(b.open, b.close) + cap, lo = Math.min(b.open, b.close) - cap;
+    return b.high > hi || b.low < lo ? { ...b, high: Math.min(b.high, hi), low: Math.max(b.low, lo) } : b;
+  });
+}
+function rebuildBars() {
+  state.bars = aggregate(clipWicks(state.rawBars));
+  barIndex.clear();
+  state.bars.forEach((b) => barIndex.set(b.time, b));
+}
+function renderTfTabs() {
+  const opts = TF_OPTIONS[state.range], el = $("#tf-tabs");
+  el.hidden = !opts;
+  if (!opts) return;
+  el.innerHTML = opts.map((m) => `<button data-tf="${m}" class="${m === tfMinutes() ? "active" : ""}">${m}m</button>`).join("");
+}
+$("#tf-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.tf = { ...state.tf, [state.range]: +b.dataset.tf };
+  store.set("mp.tf", state.tf);
+  renderTfTabs();
+  rebuildBars();
+  renderChart();
+});
+
+// Expand: the chart fills the browser window (not OS full screen) — handy while day trading. Esc closes.
+function setChartExpanded(on) {
+  if (on === $(".chart-card").classList.contains("expanded")) return;
+  $(".chart-card").classList.toggle("expanded", on);
+  document.body.classList.toggle("chart-expanded", on);
+  $("#fs-btn").classList.toggle("on", on);
+  $("#fs-btn").title = on ? "Exit expanded chart (Esc)" : "Expand chart to the full page";
+  if (state.bars.length) requestAnimationFrame(() => fitChart());
+}
+$("#fs-btn").addEventListener("click", () => setChartExpanded(!$(".chart-card").classList.contains("expanded")));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $(".chart-card").classList.contains("expanded") && !document.querySelector(".modal:not([hidden]), .palette:not([hidden])")) setChartExpanded(false);
+});
+
+// Touchpad / mouse wheel on the chart:
+//   horizontal swipe (or Shift+wheel) pans through time, pinch (Ctrl/⌘+wheel) zooms at the cursor.
+//   Plain vertical wheel zooms only in the expanded chart; inline it keeps scrolling the page.
+function chartWheel(e) {
+  const ts = chart.timeScale(), r = ts.getVisibleLogicalRange(), n = state.bars.length;
+  if (!r || !n) return;
+  const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  const dx = e.deltaX * k, dy = e.deltaY * k;
+  const expanded = $(".chart-card").classList.contains("expanded");
+  const zoom = e.ctrlKey || e.metaKey || (expanded && Math.abs(dy) > Math.abs(dx));
+  if (!zoom && Math.abs(dx) <= Math.abs(dy)) return; // vertical scroll: let the page have it
+  e.preventDefault();
+  const span = r.to - r.from, w = ts.width() || 1;
+  let from, to;
+  if (zoom) {
+    const box = $("#chart").getBoundingClientRect();
+    const at = ts.coordinateToLogical(e.clientX - box.left) ?? r.to;
+    const f = Math.exp(dy * (e.ctrlKey ? 0.01 : 0.0025)); // pinch deltas are small
+    const newSpan = Math.min(Math.max(span * f, 12), n + 40);
+    from = at - (at - r.from) * (newSpan / span);
+    to = from + newSpan;
+  } else {
+    const shift = (dx / w) * span;
+    from = r.from + shift;
+    to = r.to + shift;
+  }
+  // Keep some bars on screen at either end.
+  const lo = -(to - from) + 5, hi = n + (to - from) - 5;
+  if (from < lo) [from, to] = [lo, lo + (to - from)];
+  if (to > hi) [from, to] = [hi - (to - from), hi];
+  ts.setVisibleLogicalRange({ from, to });
+}
+$("#chart").addEventListener("wheel", chartWheel, { passive: false });
 
 // Support/resistance + trade-plan price lines, toggled by the "Levels" button.
 let levelLines = [];
@@ -268,20 +391,19 @@ const barIndex = new Map();
 const timeKey = (t) => (typeof t === "object" ? `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}` : t);
 chart.subscribeCrosshairMove((p) => setLegend(p.time && p.point ? barIndex.get(timeKey(p.time)) : null));
 
-async function loadHistory(fit = true) {
+async function loadHistory(fit = true, quiet = false) {
   const { symbol, range } = state;
-  $("#chart-loading").classList.add("on");
+  if (!quiet) $("#chart-loading").classList.add("on");
   try {
     const h = await api(`/api/history/${symbol}?range=${range}&ext=${state.showExt}`);
     if (symbol !== state.symbol || range !== state.range) return;
-    state.bars = h.bars;
+    state.rawBars = h.bars;
     state.intraday = h.intraday;
-    barIndex.clear();
-    h.bars.forEach((b) => barIndex.set(b.time, b));
+    rebuildBars();
     renderChart(fit);
   } catch (e) {
-    if (symbol !== state.symbol) return;
-    state.bars = [];
+    if (symbol !== state.symbol || quiet) return; // a failed background refresh keeps the current chart
+    state.bars = state.rawBars = [];
     priceSeries?.setData([]);
     volSeries.setData([]);
     $("#range-ret").innerHTML = `<span class="err">No chart data</span>`;
@@ -298,22 +420,31 @@ function applyTick(t) {
   if (price == null) return;
   const bars = state.bars, last = bars[bars.length - 1];
   if (!state.intraday && extTick) return; // daily bars only reflect the regular session
-  if (state.range === "1D" || (extTick && state.range === "5D")) {
-    if (t.bar_time > last.time && Math.floor(t.bar_time / 86400) === Math.floor(last.time / 86400)) {
-      const nb = { time: t.bar_time, open: price, high: price, low: price, close: price, volume: 0, ...(extTick ? { ext: true } : {}) };
-      bars.push(nb);
-      barIndex.set(nb.time, nb);
-    } else if (t.bar_time !== last.time) return;
-  }
-  const b = bars[bars.length - 1];
-  b.close = price;
-  b.high = Math.max(b.high, price);
-  b.low = Math.min(b.low, price);
-  const extC = css("--muted");
-  priceSeries.update(state.style === "candle"
-    ? (b.ext ? { ...b, color: extC, wickColor: extC, borderColor: extC } : b)
-    : (b.ext ? { time: b.time, value: b.close, lineColor: extC, topColor: extC + "22", bottomColor: extC + "00" } : { time: b.time, value: b.close }));
+  const intra = state.range === "1D" || (extTick && state.range === "5D");
+  // Keep the raw bars current too, so switching the bar interval doesn't drop live ticks.
+  if (intra) mergeTick(state.rawBars, bucketOf(t.bar_time, TF_OPTIONS[state.range][0]), price, extTick);
+  else mergeTick(state.rawBars, state.rawBars[state.rawBars.length - 1].time, price, extTick);
+  const b = mergeTick(bars, intra ? bucketOf(t.bar_time, tfMinutes()) : last.time, price, extTick);
+  if (!b) return;
+  barIndex.set(b.time, b);
+  priceSeries.update(seriesPoint(b, bars[bars.length - 2]));
   renderRangeReturn();
+}
+
+// Fold a live price into the bar at time `t` (opening a new bar later the same day); returns it.
+function mergeTick(bars, t, price, ext) {
+  const last = bars[bars.length - 1];
+  if (!last) return null;
+  if (t > last.time && Math.floor(t / 86400) === Math.floor(last.time / 86400)) {
+    const nb = { time: t, open: price, high: price, low: price, close: price, volume: 0, ...(ext ? { ext: true } : {}) };
+    bars.push(nb);
+    return nb;
+  }
+  if (t !== last.time) return null;
+  last.close = price;
+  last.high = Math.max(last.high, price);
+  last.low = Math.min(last.low, price);
+  return last;
 }
 
 /* ================================================================ stock view */
@@ -335,6 +466,9 @@ function renderQuote(q) {
   setAvatar(q.symbol);
   setPrice(q.last_price, q.change, q.change_percent);
   renderRanges();
+  setBaseStats(q);
+}
+function setBaseStats(q) {
   state.baseStats = [
     ["Open", fmt(q.open)], ["Prev close", fmt(q.prev_close)], ["Volume", big(q.volume)], ["Avg volume", big(q.volume_average)],
     ["Bid", q.bid ? `${fmt(q.bid)} × ${q.bid_size ?? 0}` : "—"], ["Ask", q.ask ? `${fmt(q.ask)} × ${q.ask_size ?? 0}` : "—"],
@@ -453,6 +587,12 @@ function startStream(symbol) {
     setPrice(t.price, t.change, t.change_percent);
     renderExt(t.ext);
     applyTick(t);
+    if (state.quote) {
+      // Keep the day's open / high / low, volume and bid/ask current too, not just the price.
+      for (const k of ["open", "high", "low", "volume", "bid", "ask", "bid_size", "ask_size"]) if (t[k] != null) state.quote[k] = t[k];
+      if (t.price != null) Object.assign(state.quote, { last_price: t.price, change: t.change, change_percent: t.change_percent });
+      setBaseStats(state.quote);
+    }
     renderRanges();
     tag.className = "live-tag on";
     $("span", tag).textContent = marketStatus().key === "open" ? "Live" : "Streaming";
@@ -461,12 +601,21 @@ function startStream(symbol) {
   };
   // The server recycles each stream every ~60s and EventSource reconnects on its own;
   // only show "Reconnecting" if no quote arrives for a while.
-  let lastMsg = Date.now();
-  src.addEventListener("message", () => (lastMsg = Date.now()));
-  src.onerror = () => setTimeout(() => {
-    if (state.source === src && Date.now() - lastMsg > 8000) { tag.className = "live-tag"; $("span", tag).textContent = "Reconnecting"; }
-  }, 8000);
+  src.addEventListener("message", () => (state.lastTick = Date.now()));
+  state.lastTick = Date.now();
+  src.onerror = () => {
+    // EventSource retries network drops itself, but gives up for good on an HTTP error
+    // (e.g. a 502 while the server restarts) — then start a fresh stream.
+    if (src.readyState === EventSource.CLOSED) setTimeout(() => state.source === src && startStream(symbol), 3000);
+    setTimeout(() => {
+      if (state.source === src && Date.now() - state.lastTick > 8000) { tag.className = "live-tag"; $("span", tag).textContent = "Reconnecting"; }
+    }, 8000);
+  };
 }
+// Watchdog: a stream that has silently stalled (sleep/wake, proxy hiccup) gets restarted.
+setInterval(() => {
+  if (state.symbol && state.source && Date.now() - state.lastTick > 30000) startStream(state.symbol);
+}, 10000);
 
 /* ================================================================ news */
 const srcInitials = (s) => (s || "?").split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
@@ -524,14 +673,14 @@ $("#news-filter").addEventListener("click", (e) => {
   loadMarketNews();
 });
 
-async function loadStockNews(symbol) {
+async function loadStockNews(symbol, quiet = false) {
   $("#stock-news-title").textContent = `${symbol} News`;
-  $("#stock-news").innerHTML = skeleton(6);
+  if (!quiet) $("#stock-news").innerHTML = skeleton(6);
   try {
     const items = await withRetry(() => api(`/api/news/${symbol}?limit=20`), { tries: 2 });
     if (symbol === state.symbol) $("#stock-news").innerHTML = newsHTML(items);
   } catch {
-    if (symbol === state.symbol) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">No news found for ${esc(symbol)}.</div>`;
+    if (symbol === state.symbol && !quiet) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">No news found for ${esc(symbol)}.</div>`;
   }
 }
 
@@ -1090,9 +1239,11 @@ $("#analyze-btn").addEventListener("click", analyze);
 const money = (n, d = 0) => (n == null ? "∞" : `${n < 0 ? "-" : ""}$${fmt(Math.abs(n), d)}`);
 const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
 
-async function loadSignals(symbol) {
-  state.signals = null;
-  $("#signals").innerHTML = Array.from({ length: 8 }, () => `<div class="sig sk" style="height:86px"></div>`).join("");
+async function loadSignals(symbol, quiet = false) {
+  if (!quiet) {
+    state.signals = null;
+    $("#signals").innerHTML = Array.from({ length: 8 }, () => `<div class="sig sk" style="height:86px"></div>`).join("");
+  }
   try {
     const sig = await api(`/api/signals/${symbol}`);
     if (symbol !== state.symbol) return;
@@ -1100,7 +1251,7 @@ async function loadSignals(symbol) {
     renderSignals();
     drawLevels();
   } catch (e) {
-    if (symbol === state.symbol) $("#signals").innerHTML = `<div class="muted" style="grid-column:1/-1">Signals unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
+    if (symbol === state.symbol && !quiet) $("#signals").innerHTML = `<div class="muted" style="grid-column:1/-1">Signals unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
   }
 }
 
@@ -1685,15 +1836,19 @@ $("#range-tabs").addEventListener("click", (e) => {
   if (!b) return;
   state.range = b.dataset.range;
   $$("#range-tabs button").forEach((x) => x.classList.toggle("active", x === b));
+  renderTfTabs();
   loadHistory();
 });
 $("#style-tabs").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   state.style = b.dataset.style;
+  store.set("mp.style", state.style);
   $$("#style-tabs button").forEach((x) => x.classList.toggle("active", x === b));
-  renderChart();
+  renderChart(false);
 });
+$$("#style-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.style === state.style));
+renderTfTabs();
 
 /* ================================================================ routing */
 function go(symbol) {
@@ -1706,6 +1861,7 @@ async function route() {
   const symbol = decodeURIComponent(location.hash.replace(/^#\/?/, "")).toUpperCase();
   window.scrollTo(0, 0);
   if (!symbol) {
+    setChartExpanded(false);
     state.symbol = null;
     state.source?.close();
     $("#stock-view").hidden = true;
@@ -1714,7 +1870,7 @@ async function route() {
     renderWatchlist();
     return;
   }
-  Object.assign(state, { symbol, lastPrice: null, prevClose: null, bars: [], quote: null, overview: null, baseStats: null, trade: null, signals: null });
+  Object.assign(state, { symbol, lastPrice: null, prevClose: null, bars: [], rawBars: [], quote: null, overview: null, baseStats: null, trade: null, signals: null });
   $("#home-view").hidden = true;
   $("#stock-view").hidden = false;
   document.title = `${symbol} · Maru Pulse`;
@@ -2054,4 +2210,22 @@ setInterval(() => { if (!state.symbol) loadIndices(); }, 20000);
 setInterval(() => refreshWatchlist(false), 10000);
 setInterval(() => refreshWatchlist(true), 120000);
 setInterval(() => { if (!state.symbol) { loadMarketNews(); loadMovers(); } }, 120000);
-setInterval(() => { if (state.symbol && state.range === "1D" && marketStatus().key === "open") loadHistory(false); }, 60000);
+// Stock page background refreshes while there's trading to show.
+const isTrading = () => { const k = marketStatus().key; return k === "open" || (k === "ext" && state.showExt); };
+setInterval(() => {
+  // Intraday charts pick up the bars' real volume / OHLC (live ticks only move the price).
+  if (state.symbol && state.intraday && ["1D", "5D", "1M"].includes(state.range) && (marketStatus().key === "open" || (isTrading() && ["1D", "5D"].includes(state.range)))) loadHistory(false, true);
+}, 60000);
+setInterval(() => { if (state.symbol && isTrading()) { loadSignals(state.symbol, true); loadStockNews(state.symbol, true); } }, 5 * 60000);
+// Coming back to a tab after a while (or waking the laptop): catch everything up at once.
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return void (hiddenAt = Date.now());
+  if (!hiddenAt || Date.now() - hiddenAt < 60000) return;
+  refreshWatchlist(true);
+  if (!state.symbol) return void (loadIndices(), loadMarketNews(), loadMovers());
+  startStream(state.symbol);
+  loadHistory(false, true);
+  loadSignals(state.symbol, true);
+  loadStockNews(state.symbol, true);
+});

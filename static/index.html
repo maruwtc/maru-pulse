@@ -152,15 +152,20 @@
               <div class="seg" id="range-tabs">
                 <button data-range="1D" class="active">1D</button><button data-range="5D">5D</button><button data-range="1M">1M</button><button data-range="6M">6M</button><button data-range="1Y">1Y</button><button data-range="5Y">5Y</button>
               </div>
+              <div class="seg small" id="tf-tabs" title="Bar interval"></div>
               <span class="range-ret" id="range-ret"></span>
               <button class="toggle" id="ext-btn" title="Include pre-market (4:00–9:30) and after-hours (16:00–20:00 ET) trading on 1D / 5D">Ext hrs</button>
               <button class="toggle" id="levels-btn" title="Show support / resistance and trade plan levels">Levels</button>
               <div class="seg small" id="style-tabs">
-                <button data-style="area" class="active" title="Line">
+                <button data-style="area" title="Line">
                   <svg viewBox="0 0 24 24" class="i"><path d="M3 17l6-6 4 4 8-8" /></svg></button>
                 <button data-style="candle" title="Candles">
-                  <svg viewBox="0 0 24 24" class="i"><path d="M7 4v16M17 4v16" /><rect x="5" y="8" width="4" height="7" /><rect x="15" y="6" width="4" height="9" /></svg></button>
+                  <svg viewBox="0 0 24 24" class="i"><path d="M7 4v16M17 4v16" /><rect x="5" y="8" width="4" height="7" fill="currentColor" /><rect x="15" y="6" width="4" height="9" fill="currentColor" /></svg></button>
+                <button data-style="hollow" class="active" title="Hollow candles">
+                  <svg viewBox="0 0 24 24" class="i"><path d="M7 4v4M7 15v5M17 4v2M17 15v5" /><rect x="5" y="8" width="4" height="7" fill="none" /><rect x="15" y="6" width="4" height="9" fill="currentColor" /></svg></button>
               </div>
+              <button class="toggle icon" id="fs-btn" title="Expand chart to the full page">
+                <svg viewBox="0 0 24 24" class="i"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg></button>
             </div>
             <div class="chart-wrap">
               <div class="legend mono" id="legend"></div>

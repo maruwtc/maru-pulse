@@ -41,18 +41,16 @@ load_dotenv(ROOT / ".env")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY", "")
-DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
+DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-v4.1-flash")
 NY = ZoneInfo("America/New_York")
 PROVIDER = "yfinance"
 STREAM_LIFETIME = 60  # seconds per SSE connection
 
 # Cheap-but-capable OpenRouter models (USD per 1M tokens, input/output).
 MODELS = [
-    {"id": "deepseek/deepseek-v4-flash", "label": "DeepSeek V4 Flash", "price": "$0.14 / $0.28"},
-    {"id": "google/gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite", "price": "$0.10 / $0.40"},
-    {"id": "qwen/qwen3.7-flash", "label": "Qwen 3.7 Flash", "price": "$0.03 / $0.13"},
-    {"id": "z-ai/glm-5.3-flash", "label": "GLM 5.3 Flash", "price": "$0.15 / $0.50"},
-    {"id": "openai/gpt-5-nano", "label": "GPT-5 Nano", "price": "$0.05 / $0.40"},
+    {"id": "deepseek/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash", "price": "$0.02 / $0.60"},
+    {"id": "z-ai/glm-5.3-flash", "label": "GLM 5.3 Flash", "price": "$0.02 / $0.30"},
+    {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "price": "$0.10 / $0.50"}
 ]
 
 MARKET_NEWS_SYMBOLS = "SPY,QQQ,DIA,IWM"
@@ -494,6 +492,7 @@ async def stream(request: Request, symbol: str, interval: float = 5):
                 now = datetime.now(NY).replace(tzinfo=None, second=0, microsecond=0)
                 payload = {"symbol": symbol, "price": q.get("last_price"), "change": q.get("change"),
                            "change_percent": q.get("change_percent"), "volume": q.get("volume"),
+                           **{k: q.get(k) for k in ("open", "high", "low", "bid", "ask", "bid_size", "ask_size")},
                            "ext": ext.get("session"), "market_state": ext.get("market_state"),
                            "bar_time": int((now - datetime(1970, 1, 1)).total_seconds()),
                            "ts": time.time()}
