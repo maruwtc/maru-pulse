@@ -73,6 +73,14 @@ RANGES = {
 }
 
 app = FastAPI(title="Maru Pulse")
+
+
+# TEMP (Vercel bring-up): surface the error type/message on 500s — runtime logs aren't reachable yet.
+@app.exception_handler(Exception)
+async def _debug_500(request: Request, exc: Exception):
+    from fastapi.responses import JSONResponse
+    log.exception("Unhandled error on %s", request.url.path)
+    return JSONResponse({"error": f"{type(exc).__name__}: {str(exc)[:500]}"}, status_code=500)
 log = logging.getLogger("maru_pulse")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # don't log every outbound request
