@@ -278,6 +278,20 @@
             <div class="stats" id="stats"></div>
           </section>
 
+          <section class="card chain-card" id="opt-card">
+            <div class="card-head">
+              <div><h2>Options</h2><div class="muted tiny" id="opt-sub">Chain by expiration · delayed quotes</div></div>
+              <div class="opt-controls">
+                <select id="opt-exp" aria-label="Expiration"></select>
+                <div class="seg small" id="opt-view">
+                  <button data-view="both" class="active">Both</button><button data-view="call">Calls</button><button data-view="put">Puts</button>
+                </div>
+              </div>
+            </div>
+            <div class="stats opt-stats" id="opt-stats"></div>
+            <div class="opt-table-wrap" id="opt-table"></div>
+          </section>
+
           <section class="card" id="about-card" hidden>
             <div class="card-head"><h2>About</h2><a class="muted tiny link" id="about-url" target="_blank" rel="noopener"></a></div>
             <div class="about-facts" id="about-facts"></div>

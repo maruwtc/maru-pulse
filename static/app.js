@@ -1287,6 +1287,106 @@ function renderSignals() {
   $("#signals").innerHTML = tiles.join("");
 }
 
+/* ================================================================ options chain */
+const optState = { data: null, view: "both" };
+async function loadOptions(symbol, expiration = null) {
+  $("#opt-table").innerHTML = `<div class="sk-line"></div><div class="sk-line" style="width:80%"></div><div class="sk-line" style="width:60%"></div>`;
+  if (!expiration) { $("#opt-stats").innerHTML = ""; $("#opt-exp").innerHTML = ""; }
+  try {
+    const url = `/api/options/${symbol}${expiration ? `?expiration=${expiration}` : ""}`;
+    let d;
+    for (let attempt = 0; ; attempt++) { // Yahoo's options endpoint fails intermittently
+      try { d = await api(url); break; } catch (e) {
+        if (attempt >= 1 || symbol !== state.symbol) throw e;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    }
+    if (symbol !== state.symbol) return;
+    optState.data = d;
+    renderOptions();
+  } catch (e) {
+    if (symbol === state.symbol) $("#opt-table").innerHTML = `<div class="muted">Options unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
+  }
+}
+function renderOptions() {
+  const d = optState.data;
+  if (!d.expirations.length) {
+    $("#opt-exp").hidden = true;
+    $("#opt-stats").innerHTML = "";
+    $("#opt-table").innerHTML = `<div class="muted">No listed options for ${esc(state.symbol)}.</div>`;
+    return;
+  }
+  $("#opt-exp").hidden = false;
+  $("#opt-exp").innerHTML = d.expirations.map((e) => `<option value="${e.expiration}">${shortDate(e.expiration)} · ${e.dte}d</option>`).join("");
+  $("#opt-exp").value = d.expiration;
+  const s = d.summary;
+  $("#opt-sub").textContent = `Chain by expiration · ${s.quoted ? "delayed mid-quotes" : "last trade prices (market closed)"}`;
+  $("#opt-stats").innerHTML = [
+    ["ATM IV", s.atm_iv != null ? `${fmt(s.atm_iv, 1)}%` : "—"],
+    ["Expected move", s.expected_move != null ? `±${fmt(s.expected_move)} · ${fmt(s.expected_move_pct, 1)}%` : "—"],
+    ["Max pain", fmt(s.max_pain)],
+    ["Days to exp.", d.dte],
+    ["Call OI", s.call_oi ? big(s.call_oi) : "—"], ["Put OI", s.put_oi ? big(s.put_oi) : "—"], ["P/C OI", fmt(s.put_call_oi)], ["P/C volume", fmt(s.put_call_volume)],
+  ].map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+
+  const view = optState.view, showC = view !== "put", showP = view !== "call";
+  // Drop the least useful columns first so both sides fit the card without sideways scrolling.
+  const ALL = [["Bid", "bid"], ["Ask", "ask"], ["Mid", "mid"], ["IV", "iv"], ["Δ", "delta"], ["Vol", "volume"], ["OI", "oi"]];
+  const sides = (showC ? 1 : 0) + (showP ? 1 : 0);
+  const fit = Math.max(2, Math.floor(($("#opt-table").clientWidth - 76) / 66 / sides));
+  const keep = ["mid", "iv", "oi", "delta", "volume", "bid", "ask"].slice(0, fit);
+  const cols = ALL.filter(([, k]) => keep.includes(k));
+  optState.fit = fit;
+  const cell = (l, k) => {
+    if (!l) return `<td class="na">—</td>`;
+    const v = l[k];
+    const txt = k === "iv" ? (v != null ? `${fmt(v, 1)}%` : "—") : k === "volume" || k === "oi" ? (v ? big(v) : "—")
+      : k === "delta" ? fmt(v) : k === "mid" && !l.quoted ? `<span title="Last trade (no live quote)">${fmt(v)}*</span>` : v ? fmt(v) : "—";
+    return `<td>${txt}</td>`;
+  };
+  const side = (l, flip) => (flip ? cols.slice().reverse() : cols).map(([, k]) => cell(l, k)).join("");
+  const head = (flip) => (flip ? cols.slice().reverse() : cols).map(([h]) => `<th>${h}</th>`).join("");
+  // Calls read right-to-left toward the strike so both sides' mids sit next to it.
+  const spot = d.spot;
+  let spotDone = false;
+  const body = d.rows.map((r) => {
+    let line = "";
+    if (!spotDone && r.strike >= spot) {
+      spotDone = true;
+      line = `<tr class="spot-row"><td colspan="${(showC ? cols.length : 0) + 1 + (showP ? cols.length : 0)}"><span>Spot ${fmt(spot)}</span></td></tr>`;
+    }
+    return line + `<tr>` +
+      (showC ? side(r.call, true).replace(/<td/g, `<td class="c${r.strike < spot ? " itm" : ""}"`) : "") +
+      `<td class="strike">${fmt(r.strike, r.strike % 1 ? 2 : 0)}</td>` +
+      (showP ? side(r.put, false).replace(/<td/g, `<td class="p${r.strike > spot ? " itm" : ""}"`) : "") + `</tr>`;
+  }).join("");
+  $("#opt-table").innerHTML = `<table class="opt-table mono">
+    <thead><tr class="grp">${showC ? `<th colspan="${cols.length}" class="c">Calls</th>` : ""}<th></th>${showP ? `<th colspan="${cols.length}" class="p">Puts</th>` : ""}</tr>
+    <tr>${showC ? head(true) : ""}<th class="strike">Strike</th>${showP ? head(false) : ""}</tr></thead>
+    <tbody>${body}</tbody></table>
+    <p class="muted tiny opt-foot">Shaded cells are in the money. ${s.quoted ? "" : "* priced from last trade — no live bid/ask outside market hours. "}Δ is Black-Scholes delta from the contract's IV.</p>`;
+  // Center the at-the-money strikes in the scroll box.
+  const wrap = $("#opt-table"), spotRow = $(".spot-row", wrap);
+  if (spotRow) wrap.scrollTop = spotRow.offsetTop - wrap.clientHeight / 2;
+}
+// Re-pick the chain's columns when the card width changes (sidebar/news column reflow, window resize).
+function refitOptions() {
+  if (!optState.data?.rows?.length) return;
+  const sides = optState.view === "both" ? 2 : 1;
+  const fit = Math.max(2, Math.floor(($("#opt-table").clientWidth - 76) / 66 / sides));
+  if (Math.min(fit, 7) !== Math.min(optState.fit, 7)) renderOptions();
+}
+new ResizeObserver(refitOptions).observe($("#opt-table"));
+addEventListener("resize", refitOptions);
+$("#opt-exp").addEventListener("change", (e) => state.symbol && loadOptions(state.symbol, e.target.value));
+$("#opt-view").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || !optState.data) return;
+  optState.view = b.dataset.view;
+  $$("#opt-view button").forEach((x) => x.classList.toggle("active", x === b));
+  renderOptions();
+});
+
 const RISKS = {
   conservative: { label: "Conservative", desc: "Defined-risk only — credit/debit spreads, covered calls, cash-secured puts. Higher win-rate, smaller payoff." },
   moderate: { label: "Moderate", desc: "Balanced reward/risk — debit spreads and long options around 0.30–0.60 delta, sensible stops." },
@@ -1896,6 +1996,7 @@ async function route() {
   const saved = getTrade(symbol, state.risk);
   saved ? showTrade(saved) : tradeEmpty();
   loadSignals(symbol);
+  loadOptions(symbol);
   loadPositionsFor(symbol);
   loadStockNews(symbol);
   loadOverview(symbol);

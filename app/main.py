@@ -980,6 +980,71 @@ def chain_meta(symbol: str):
     return {"spot": spot, "expirations": out}
 
 
+@app.get("/api/options/{symbol}")
+def options_info(symbol: str, expiration: str | None = None, strikes: int = 12):
+    """Chain overview for one expiration: totals, max pain, and calls/puts side by side near the money."""
+    symbol = symbol.upper()
+    spot = get_quote(symbol)["last_price"]
+    chain = get_chain(symbol, spot)  # Yahoo failures surface as errors so the UI can retry
+    if chain.empty:
+        return {"spot": spot, "expirations": [], "rows": []}
+    exps = sorted(chain["expiration"].unique())
+    exp_list = [{"expiration": e.isoformat(), "dte": (e - date.today()).days} for e in exps]
+    if expiration:
+        exp = next((e for e in exps if e.isoformat() == expiration), None)
+        if exp is None:
+            raise HTTPException(404, f"No {symbol} options expiring {expiration}")
+    else:  # default to the first expiration about a month out, like the signals tiles
+        exp = next((e for e in exps if (e - date.today()).days >= 20), exps[-1])
+    sub = chain[chain["expiration"] == exp]
+    calls, puts = sub[sub["option_type"] == "call"], sub[sub["option_type"] == "put"]
+
+    oi = lambda df: int(df["open_interest"].fillna(0).sum())
+    vol = lambda df: int(df["volume"].fillna(0).sum())
+    # Max pain: the settlement price that minimizes total intrinsic value paid out to holders.
+    ks = sorted(sub["strike"].unique())
+    c_oi, p_oi = calls["open_interest"].fillna(0), puts["open_interest"].fillna(0)
+    pain = {k: float(((k - calls["strike"]).clip(lower=0) * c_oi).sum() + ((puts["strike"] - k).clip(lower=0) * p_oi).sum())
+            for k in ks}
+    max_pain = min(pain, key=pain.get) if pain and (c_oi.sum() + p_oi.sum()) > 0 else None
+    c, p = trading.atm_row(chain, exp, spot, "call"), trading.atm_row(chain, exp, spot, "put")
+    straddle = c["mid"] + p["mid"] if c is not None and p is not None else None
+    atm_ivs = [v for v in ((c["iv"] if c is not None else None), (p["iv"] if p is not None else None)) if v == v and v is not None]
+
+    def leg(r):
+        if r is None:
+            return None
+        return {"bid": trading.r2(r.bid), "ask": trading.r2(r.ask), "mid": trading.r2(r.mid), "last": trading.r2(r.last_trade_price),
+                "quoted": bool(r.quoted), "iv": trading.r2(r.iv * 100, 1) if r.iv == r.iv else None,
+                "delta": trading.r2(r.delta) if r.delta is not None else None,
+                "oi": int(r.open_interest) if r.open_interest == r.open_interest else 0,
+                "volume": int(r.volume) if r.volume == r.volume else 0}
+
+    by_c = {float(r.strike): r for r in calls.itertuples()}
+    by_p = {float(r.strike): r for r in puts.itertuples()}
+    atm_i = min(range(len(ks)), key=lambda i: abs(ks[i] - spot))
+    n = max(2, min(strikes, 40))
+    near = ks[max(0, atm_i - n):atm_i + n + 1]
+    rows = [{"strike": trading.r2(k), "call": leg(by_c.get(float(k))), "put": leg(by_p.get(float(k)))} for k in near]
+    return {
+        "spot": trading.r2(spot),
+        "expirations": exp_list,
+        "expiration": exp.isoformat(),
+        "dte": (exp - date.today()).days,
+        "summary": {
+            "atm_iv": trading.r2(sum(atm_ivs) / len(atm_ivs) * 100, 1) if atm_ivs else None,
+            "expected_move": trading.r2(straddle),
+            "expected_move_pct": trading.r2(straddle / spot * 100) if straddle else None,
+            "max_pain": trading.r2(max_pain),
+            "call_oi": oi(calls), "put_oi": oi(puts), "call_volume": vol(calls), "put_volume": vol(puts),
+            "put_call_oi": trading.r2(oi(puts) / oi(calls)) if oi(calls) else None,
+            "put_call_volume": trading.r2(vol(puts) / vol(calls)) if vol(calls) else None,
+            "quoted": bool(sub["quoted"].any()),
+        },
+        "rows": rows,
+    }
+
+
 def evaluate(symbol: str, positions: list[Position]) -> dict:
     spot = get_quote(symbol)["last_price"]
     sig = get_signals(symbol)
@@ -1292,7 +1357,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 @app.get("/")
 def index():
     """Serve the page with CSS/JS URLs versioned by file mtime so browsers never run stale assets."""
-    html = (ROOT / "static" / "index.html").read_text()
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
     for name in ("style.css", "app.js"):
         v = int((ROOT / "static" / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
