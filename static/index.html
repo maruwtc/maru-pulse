@@ -16,12 +16,19 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
 </head>
 <body>
+  <script>try { if (JSON.parse(localStorage.getItem("mp.sideCollapsed"))) document.body.classList.add("side-collapsed"); } catch {}</script>
   <header class="topbar">
     <button class="icon-btn only-mobile" id="menu-btn" aria-label="Watchlist">☰</button>
     <a class="brand" href="#/">
       <span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M6 20l6-6 5 4 9-9" /></svg></span>
       <span>Maru Pulse</span>
     </a>
+    <button class="top-quote" id="top-quote" title="Back to top" aria-hidden="true" tabindex="-1">
+      <span id="tq-avatar"></span>
+      <span class="tq-sym" id="tq-sym"></span>
+      <span class="tq-px mono" id="tq-px"></span>
+      <span class="tq-ch" id="tq-ch"></span>
+    </button>
     <button class="search-trigger" id="search-trigger">
       <svg viewBox="0 0 24 24" class="i"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
       <span>Search stocks, ETFs…</span>
@@ -43,6 +50,8 @@
       <div class="side-head">
         <h3>Watchlist <span class="wl-hint" title="Drag to reorder">⇅ drag to reorder</span></h3>
         <span class="muted tiny" id="wl-count"></span>
+        <button class="side-toggle" id="side-toggle" title="Collapse watchlist" aria-label="Collapse watchlist">
+          <svg viewBox="0 0 24 24" class="i"><path d="M15 6l-6 6 6 6" /></svg></button>
       </div>
       <ul class="watchlist" id="watchlist"></ul>
       <div class="side-head"><h3>Recently viewed</h3></div>
@@ -269,6 +278,7 @@
                 <button id="analyze-btn" class="btn primary"><span>Analyze</span></button>
               </div>
             </div>
+            <textarea id="ai-question" class="ai-question" rows="2" maxlength="1000" placeholder="Optional question — e.g. “Earnings beat big but the stock didn’t rise after hours — why?” or “財報開很好，但盤後沒有漲，為什麼？”"></textarea>
             <div id="ai-body"></div>
           </section>
 
@@ -283,12 +293,16 @@
               <div><h2>Options</h2><div class="muted tiny" id="opt-sub">Chain by expiration · delayed quotes</div></div>
               <div class="opt-controls">
                 <select id="opt-exp" aria-label="Expiration"></select>
+                <select id="opt-strikes" aria-label="Strikes around spot" title="Strikes shown above / below the current price">
+                  <option value="10">±10 strikes</option><option value="25">±25 strikes</option><option value="50">±50 strikes</option><option value="0">All strikes</option>
+                </select>
                 <div class="seg small" id="opt-view">
                   <button data-view="both" class="active">Both</button><button data-view="call">Calls</button><button data-view="put">Puts</button>
                 </div>
               </div>
             </div>
             <div class="stats opt-stats" id="opt-stats"></div>
+            <div class="opt-flow" id="opt-flow"></div>
             <div class="opt-table-wrap" id="opt-table"></div>
           </section>
 
@@ -301,6 +315,10 @@
         </div>
 
         <aside class="stock-side">
+          <section class="card ev-card" id="ev-card">
+            <div class="card-head"><h2>Events</h2><span class="muted tiny">Earnings · dividends · filings</span></div>
+            <div id="events"></div>
+          </section>
           <section class="card">
             <div class="card-head"><h2 id="stock-news-title">News</h2></div>
             <div id="stock-news" class="news compact"></div>

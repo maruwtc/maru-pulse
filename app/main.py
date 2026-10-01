@@ -511,6 +511,7 @@ async def stream(request: Request, symbol: str, interval: float = 5):
 class AnalyzeRequest(BaseModel):
     symbol: str
     model: str | None = None
+    question: str | None = None
 
 
 def build_context(symbol: str) -> str:
@@ -539,6 +540,34 @@ def build_context(symbol: str) -> str:
         pass
 
     try:
+        ext = get_ext(symbol)
+        sess = {k: ext[k] for k in ("pre", "post") if k in ext}
+        if sess:
+            for v in sess.values():
+                if isinstance(v.get("time"), (int, float)):
+                    v["time"] = datetime.fromtimestamp(v["time"], NY).strftime("%Y-%m-%d %H:%M ET")
+            parts.append(f"## Extended-hours trading (pre-market / after hours)\nmarket_state={ext.get('market_state')} "
+                         f"{json.dumps(sess, default=str)}")
+    except Exception:
+        pass
+
+    try:
+        ev = get_events(symbol)
+        lines = []
+        if ev.get("earnings"):
+            lines.append(f"Next earnings: {json.dumps(ev['earnings'], default=str)}")
+        if ev.get("history"):
+            lines.append("Recent quarters (EPS reported vs estimate, surprise %): " + json.dumps(ev["history"], default=str))
+        if ev.get("dividends"):
+            lines.append(f"Dividends: {json.dumps(ev['dividends'], default=str)}")
+        if ev.get("filings"):
+            lines.append("Recent SEC filings: " + "; ".join(f"{f['date']} {f['form']} {f['title']}" for f in ev["filings"]))
+        if lines:
+            parts.append("## Earnings & corporate events\n" + "\n".join(lines))
+    except Exception:
+        pass
+
+    try:
         news = get_news(symbol, 15)
         lines = [f"- [{(n.get('date') or '')[:10]}] {n['title']} ({n.get('source')}): {(n.get('summary') or '')[:300]}"
                  for n in news]
@@ -558,6 +587,15 @@ analysis in Markdown with these sections:
 ### Bull Case / Bear Case  (bullets)
 ### Key Risks & Catalysts to Watch
 Be specific with numbers. Say when data is missing. End with a one-line reminder that this is not investment advice."""
+
+
+QUESTION_PROMPT = """The user has a specific question about this stock. Put it first:
+### Your Question  (answer it directly and specifically, using the numbers in the data — e.g. for "great earnings but
+the stock didn't rise": compare the beat to expectations and the size of past surprises, the run-up into the report, the
+after-hours / pre-market move, valuation, guidance or news themes, and "sell the news" positioning. Say clearly which
+factors the data supports and what you cannot verify (e.g. guidance or call commentary not in the data).)
+Then continue with the remaining sections, kept shorter. Write the whole response in the same language as the user's
+question (e.g. Traditional Chinese if they wrote in Traditional Chinese), keeping tickers and numbers as-is."""
 
 
 class OpenRouterError(Exception):
@@ -676,9 +714,12 @@ async def analyze(req: AnalyzeRequest, request: Request):
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     context = await run_in_threadpool(build_context, symbol)
+    question = (req.question or "").strip()[:1000]
+    system = SYSTEM_PROMPT + ("\n\n" + QUESTION_PROMPT if question else "")
+    ask = f"\n\n## User's question\n{question}" if question else ""
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Analyze {symbol}. Today is {datetime.now(NY):%Y-%m-%d}.\n\n{context}"},
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Analyze {symbol}. Today is {datetime.now(NY):%Y-%m-%d %H:%M} ET.\n\n{context}{ask}"},
     ]
 
     async def gen():
@@ -981,7 +1022,7 @@ def chain_meta(symbol: str):
 
 
 @app.get("/api/options/{symbol}")
-def options_info(symbol: str, expiration: str | None = None, strikes: int = 12):
+def options_info(symbol: str, expiration: str | None = None, strikes: int = 25):
     """Chain overview for one expiration: totals, max pain, and calls/puts side by side near the money."""
     symbol = symbol.upper()
     spot = get_quote(symbol)["last_price"]
@@ -1023,7 +1064,7 @@ def options_info(symbol: str, expiration: str | None = None, strikes: int = 12):
     by_c = {float(r.strike): r for r in calls.itertuples()}
     by_p = {float(r.strike): r for r in puts.itertuples()}
     atm_i = min(range(len(ks)), key=lambda i: abs(ks[i] - spot))
-    n = max(2, min(strikes, 40))
+    n = len(ks) if strikes <= 0 else max(2, strikes)  # strikes <= 0 → every listed strike
     near = ks[max(0, atm_i - n):atm_i + n + 1]
     rows = [{"strike": trading.r2(k), "call": leg(by_c.get(float(k))), "put": leg(by_p.get(float(k)))} for k in near]
     return {
@@ -1042,7 +1083,31 @@ def options_info(symbol: str, expiration: str | None = None, strikes: int = 12):
             "quoted": bool(sub["quoted"].any()),
         },
         "rows": rows,
+        "flow": options_flow(chain, spot),
     }
+
+
+def options_flow(chain: pd.DataFrame, spot: float, n: int = 4) -> dict:
+    """Largest call / put contracts across every expiration, ranked by premium traded (volume × price × 100).
+
+    Strikes are limited to ±30% of spot: deep in-the-money contracts carry huge premiums from stock-replacement
+    trades and spread legs (often stale last-trade prices) and would crowd out the directional bets."""
+    df = chain.assign(volume=chain["volume"].fillna(0), open_interest=chain["open_interest"].fillna(0))
+    df = df[(df["volume"] > 0) & df["strike"].between(spot * 0.7, spot * 1.3)].assign(premium=lambda d: d["volume"] * d["mid"] * 100)
+
+    def top(kind):
+        out = []
+        for r in df[df["option_type"] == kind].nlargest(n, "premium").itertuples():
+            itm = r.strike < spot if kind == "call" else r.strike > spot
+            out.append({"expiration": r.expiration.isoformat(), "dte": (r.expiration - date.today()).days,
+                        "strike": trading.r2(r.strike), "mid": trading.r2(r.mid), "volume": int(r.volume),
+                        "oi": int(r.open_interest), "premium": round(float(r.premium)), "itm": bool(itm),
+                        "otm_pct": trading.r2((r.strike / spot - 1) * 100, 1),
+                        # Volume above open interest means mostly new positions opened today.
+                        "unusual": bool(r.open_interest and r.volume > r.open_interest)})
+        return out
+
+    return {"calls": top("call"), "puts": top("put")}
 
 
 def evaluate(symbol: str, positions: list[Position]) -> dict:
@@ -1290,6 +1355,113 @@ def calendar(days: int = 7, symbols: str = ""):
     except HTTPException as e:
         out["errors"].append(f"earnings: {e.detail}")
     return out
+
+
+# SEC forms worth surfacing next to news; insider (3/4/5, 144) and fund filings are noise here.
+KEY_FORMS = {"10-K": "Annual report", "10-Q": "Quarterly report", "8-K": "Current report", "20-F": "Annual report",
+             "6-K": "Current report", "10-K/A": "Annual report (amended)", "10-Q/A": "Quarterly report (amended)",
+             "DEF 14A": "Proxy statement", "S-1": "Registration", "S-3": "Shelf registration"}
+# 8-K item codes → what happened.
+EIGHT_K_ITEMS = {"2.02": "Earnings release", "1.01": "Material agreement", "2.01": "Acquisition / disposal",
+                 "5.02": "Executive / board change", "5.07": "Shareholder vote", "7.01": "Reg FD disclosure",
+                 "8.01": "Other event", "1.02": "Agreement terminated", "2.03": "New debt obligation", "3.02": "Unregistered equity sale"}
+
+
+def get_events(symbol: str) -> dict:
+    """Corporate events for one stock: next/past earnings, dividends, splits and key SEC filings."""
+    def load():
+        import yfinance as yf
+        t = yf.Ticker(symbol)
+        out = {"symbol": symbol, "earnings": None, "history": [], "dividends": None, "split": None, "filings": []}
+        today = datetime.now(NY).date()
+        try:
+            ed = t.get_earnings_dates(limit=12)
+            if ed is not None and not ed.empty:
+                ed = ed.sort_index()
+                for ts, r in ed.iterrows():
+                    eps_est, eps = clean(r.get("EPS Estimate")), clean(r.get("Reported EPS"))
+                    when = ts.tz_convert(NY) if ts.tzinfo else ts
+                    if eps is None and when.date() >= today and out["earnings"] is None:
+                        mins = when.hour * 60 + when.minute
+                        out["earnings"] = {"date": when.date().isoformat(), "days": (when.date() - today).days,
+                                           "time": "After close" if mins >= 960 else "Before open" if 0 < mins <= 570 else None,
+                                           "eps_estimate": eps_est}
+                    elif eps is not None:
+                        out["history"].append({"date": when.date().isoformat(), "eps_estimate": eps_est, "eps": eps,
+                                               "surprise_pct": clean(r.get("Surprise(%)")),
+                                               "before_open": 0 < when.hour * 60 + when.minute <= 570})
+                out["history"] = out["history"][-4:][::-1]
+        except Exception:
+            pass
+        try:  # how the stock actually reacted: first regular-session close that could price in the report
+            closes = {b["time"]: b["close"] for b in get_history(symbol, "1Y")["bars"] if b["close"]}
+            days = sorted(closes)
+            for h in out["history"]:
+                before_open = h.pop("before_open")
+                i = next((k for k, d in enumerate(days) if d >= h["date"]), None)
+                if i is None:
+                    continue
+                if days[i] != h["date"] or before_open:  # report before the open (or on a non-trading day): that day vs prior close
+                    a, b = (i - 1, i)
+                else:  # after the close: next day vs report-day close
+                    a, b = (i, i + 1)
+                if a >= 0 and b < len(days):
+                    h["reaction_pct"] = round((closes[days[b]] / closes[days[a]] - 1) * 100, 2)
+        except Exception:
+            for h in out["history"]:
+                h.pop("before_open", None)
+        try:
+            cal = t.calendar or {}
+            if out["earnings"] and cal:
+                out["earnings"].update({"eps_low": clean(cal.get("Earnings Low")), "eps_high": clean(cal.get("Earnings High")),
+                                        "revenue_estimate": clean(cal.get("Revenue Average"))})
+            if cal.get("Ex-Dividend Date"):
+                out["dividends"] = {"ex_date": str(cal["Ex-Dividend Date"]), "pay_date": str(cal.get("Dividend Date") or "") or None}
+        except Exception:
+            pass
+        try:
+            div = t.dividends
+            if div is not None and not div.empty:
+                last = div.index[-1]
+                d = out["dividends"] or {}
+                gaps = pd.Series(div.index[-6:]).diff().dt.days.dropna()
+                per_year = min(12, max(1, round(365 / gaps.median()))) if len(gaps) else 1  # 4 = quarterly, 12 = monthly
+                d.update({"amount": round(float(div.iloc[-1]), 4), "last_ex_date": last.date().isoformat(),
+                          "per_year": per_year, "annual": round(float(div.iloc[-1]) * per_year, 4),
+                          "raised": bool(len(div) > 1 and div.iloc[-1] > div.iloc[-2])})
+                out["dividends"] = d
+        except Exception:
+            pass
+        try:
+            sp = t.splits
+            if sp is not None and not sp.empty:
+                ratio = float(sp.iloc[-1])
+                out["split"] = {"date": sp.index[-1].date().isoformat(),
+                                "ratio": f"{ratio:g}-for-1" if ratio >= 1 else f"1-for-{1 / ratio:g}"}
+        except Exception:
+            pass
+        try:
+            fl = records(obb_call(obb.equity.fundamental.filings, symbol=symbol, provider="sec", limit=150))
+            for f in fl:
+                form = f.get("report_type")
+                if form not in KEY_FORMS:
+                    continue
+                items = [i.strip() for i in str(f.get("items") or "").split(",") if i.strip()]
+                what = next((EIGHT_K_ITEMS[i] for i in items if i in EIGHT_K_ITEMS), None) if form in ("8-K", "6-K") else None
+                out["filings"].append({"date": str(f.get("filing_date"))[:10], "form": form, "title": what or KEY_FORMS[form],
+                                       "url": f.get("report_url") or f.get("filing_detail_url")})
+                if len(out["filings"]) >= 6:
+                    break
+        except Exception:
+            pass
+        return out
+
+    return cached(f"events:{symbol}", 3600, load)
+
+
+@app.get("/api/events/{symbol}")
+def events(symbol: str):
+    return get_events(symbol.upper())
 
 
 @app.get("/api/next-earnings/{symbol}")

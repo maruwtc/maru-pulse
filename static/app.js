@@ -454,6 +454,8 @@ function setAvatar(sym) {
   const el = tpl.content.firstElementChild;
   el.id = "q-avatar";
   $("#q-avatar").replaceWith(el);
+  $("#tq-avatar").innerHTML = avatar(sym, 26);
+  $("#tq-sym").textContent = sym;
 }
 
 function renderQuote(q) {
@@ -467,6 +469,7 @@ function renderQuote(q) {
   setPrice(q.last_price, q.change, q.change_percent);
   renderRanges();
   setBaseStats(q);
+  if (state.events) renderEvents(state.events); // dividend yield needs the price
 }
 function setBaseStats(q) {
   state.baseStats = [
@@ -567,6 +570,9 @@ function setPrice(price, change, changePct) {
   const c = $("#q-change");
   c.textContent = change == null ? "" : `${change >= 0 ? "+" : ""}${fmt(change)} (${pct(changePct)})`;
   c.className = `delta ${cls(change)}`;
+  $("#tq-px").textContent = fmt(price);
+  $("#tq-ch").textContent = changePct == null ? "" : pct(changePct);
+  $("#tq-ch").className = `tq-ch chg-chip ${cls(changePct)}`;
   if (state.range === "1D" && state.bars.length) renderRangeReturn();
   const s = marketStatus();
   $("#q-updated").textContent = s.key === "open"
@@ -960,7 +966,7 @@ function renderWatchlist() {
   $("#watchlist").innerHTML = state.watchlist.map((s) => {
     const q = state.wlQuotes[s] || {};
     const prev = q.price != null && q.change != null ? q.price - q.change : null;
-    return `<li class="wl-item ${s === state.symbol ? "active" : ""}" data-sym="${esc(s)}">
+    return `<li class="wl-item ${s === state.symbol ? "active" : ""}" data-sym="${esc(s)}" title="${esc(s)}${q.name ? ` · ${esc(q.name)}` : ""} · ${fmt(q.price)} (${pct(q.change_percent)})">
       ${avatar(s, 28)}
       <div style="min-width:0"><div class="sym">${esc(s)}</div><div class="nm">${esc(q.name || "")}</div></div>
       ${spark(state.sparks[s], { w: 56, h: 24, ref: prev, fill: false })}
@@ -1033,6 +1039,26 @@ $("#recent").addEventListener("click", (e) => {
   if (s) { go(s); document.body.classList.remove("nav-open"); }
 });
 
+// Once the quote card scrolls under the top bar, show a compact quote in the bar instead.
+const topQuoteIO = new IntersectionObserver(([e]) => {
+  const on = !e.isIntersecting && !$("#stock-view").hidden && e.boundingClientRect.top < 60;
+  document.body.classList.toggle("quote-docked", on);
+  $("#top-quote").setAttribute("aria-hidden", String(!on));
+  $("#top-quote").tabIndex = on ? 0 : -1;
+}, { rootMargin: "-60px 0px 0px 0px" });
+topQuoteIO.observe($(".quote-card"));
+$("#top-quote").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+function setSideCollapsed(on) {
+  document.body.classList.toggle("side-collapsed", on);
+  store.set("mp.sideCollapsed", on);
+  const lbl = on ? "Expand watchlist" : "Collapse watchlist";
+  $("#side-toggle").title = lbl;
+  $("#side-toggle").setAttribute("aria-label", lbl);
+  setTimeout(() => dispatchEvent(new Event("resize")), 220); // let the chart / options table refit after the transition
+}
+setSideCollapsed(document.body.classList.contains("side-collapsed"));
+$("#side-toggle").addEventListener("click", () => setSideCollapsed(!document.body.classList.contains("side-collapsed")));
 $("#menu-btn").addEventListener("click", () => document.body.classList.toggle("nav-open"));
 $("#scrim").addEventListener("click", () => document.body.classList.remove("nav-open"));
 
@@ -1173,7 +1199,9 @@ function aiEmpty(symbol) {
 }
 
 function stanceOf(text) {
-  const tldr = (text.split(/###\s*News/i)[0] || text).toLowerCase();
+  // Prefer the TL;DR section: with a user question, the answer section comes first and may mention any stance.
+  const sec = text.match(/###\s*TL;?DR([\s\S]*?)(?=\n###|$)/i);
+  const tldr = (sec ? sec[1] : text.split(/###\s*News/i)[0] || text).toLowerCase();
   const m = tldr.match(/\b(bullish|bearish|neutral)\b/);
   return m ? m[1] : null;
 }
@@ -1184,6 +1212,7 @@ function showAnalysis(text, meta, streaming) {
   const bits = [meta?.model, meta?.completion_tokens ? `${meta.prompt_tokens + meta.completion_tokens} tokens` : null, meta?.cost != null ? `$${Number(meta.cost).toFixed(5)}` : null, meta?.at ? ago(meta.at) : null].filter(Boolean);
   $("#ai-body").innerHTML = `
     <div class="ai-meta">${stanceHTML}<span class="muted tiny">${esc(bits.join(" · "))}</span><span class="sp"></span>${!streaming ? `<button class="btn" id="copy-ai" style="height:30px;padding:0 10px;font-size:12px">Copy</button>` : ""}</div>
+    ${meta?.question ? `<div class="ai-q"><b>Q</b>${esc(meta.question)}</div>` : ""}
     ${streaming && !text ? `<div class="ai-thinking"><div class="spinner"></div>Gathering OpenBB data and analyzing…</div>` : ""}
     <div class="ai-output ${streaming ? "streaming" : ""}">${DOMPurify.sanitize(marked.parse(text || ""))}</div>`;
   $("#copy-ai")?.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Analysis copied", false)));
@@ -1193,12 +1222,13 @@ function showAnalysis(text, meta, streaming) {
 async function analyze() {
   if (!state.aiEnabled) return promptAiSetup();
   const symbol = state.symbol, btn = $("#analyze-btn"), model = currentModel();
+  const question = $("#ai-question").value.trim();
   btn.disabled = true;
-  $("#analyze-btn span").textContent = "Analyzing…";
-  let text = "", meta = { model };
+  $("#analyze-btn span").textContent = question ? "Answering…" : "Analyzing…";
+  let text = "", meta = { model, ...(question ? { question } : {}) };
   showAnalysis("", meta, true);
   try {
-    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model }) });
+    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model, question: question || null }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", pending = false;
@@ -1234,6 +1264,9 @@ async function analyze() {
   }
 }
 $("#analyze-btn").addEventListener("click", analyze);
+$("#ai-question").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("#analyze-btn").disabled) { e.preventDefault(); analyze(); }
+});
 
 /* ================================================================ trade opportunities */
 const money = (n, d = 0) => (n == null ? "∞" : `${n < 0 ? "-" : ""}$${fmt(Math.abs(n), d)}`);
@@ -1288,12 +1321,13 @@ function renderSignals() {
 }
 
 /* ================================================================ options chain */
-const optState = { data: null, view: "both" };
-async function loadOptions(symbol, expiration = null) {
+const optState = { data: null, view: "both", strikes: store.get("mp.optStrikes", 25) };
+async function loadOptions(symbol, expiration = null, strikes = optState.strikes) {
+  const req = (optState.req = (optState.req || 0) + 1); // ignore stale responses when settings change quickly
   $("#opt-table").innerHTML = `<div class="sk-line"></div><div class="sk-line" style="width:80%"></div><div class="sk-line" style="width:60%"></div>`;
   if (!expiration) { $("#opt-stats").innerHTML = ""; $("#opt-exp").innerHTML = ""; }
   try {
-    const url = `/api/options/${symbol}${expiration ? `?expiration=${expiration}` : ""}`;
+    const url = `/api/options/${symbol}?strikes=${strikes}${expiration ? `&expiration=${expiration}` : ""}`;
     let d;
     for (let attempt = 0; ; attempt++) { // Yahoo's options endpoint fails intermittently
       try { d = await api(url); break; } catch (e) {
@@ -1301,11 +1335,11 @@ async function loadOptions(symbol, expiration = null) {
         await new Promise((r) => setTimeout(r, 1500));
       }
     }
-    if (symbol !== state.symbol) return;
+    if (symbol !== state.symbol || req !== optState.req) return;
     optState.data = d;
     renderOptions();
   } catch (e) {
-    if (symbol === state.symbol) $("#opt-table").innerHTML = `<div class="muted">Options unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
+    if (symbol === state.symbol && req === optState.req) $("#opt-table").innerHTML = `<div class="muted">Options unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
   }
 }
 function renderOptions() {
@@ -1321,6 +1355,7 @@ function renderOptions() {
   $("#opt-exp").value = d.expiration;
   const s = d.summary;
   $("#opt-sub").textContent = `Chain by expiration · ${s.quoted ? "delayed mid-quotes" : "last trade prices (market closed)"}`;
+  renderFlow(d.flow, d.expiration);
   $("#opt-stats").innerHTML = [
     ["ATM IV", s.atm_iv != null ? `${fmt(s.atm_iv, 1)}%` : "—"],
     ["Expected move", s.expected_move != null ? `±${fmt(s.expected_move)} · ${fmt(s.expected_move_pct, 1)}%` : "—"],
@@ -1334,7 +1369,7 @@ function renderOptions() {
   const ALL = [["Bid", "bid"], ["Ask", "ask"], ["Mid", "mid"], ["IV", "iv"], ["Δ", "delta"], ["Vol", "volume"], ["OI", "oi"]];
   const sides = (showC ? 1 : 0) + (showP ? 1 : 0);
   const fit = Math.max(2, Math.floor(($("#opt-table").clientWidth - 76) / 66 / sides));
-  const keep = ["mid", "iv", "oi", "delta", "volume", "bid", "ask"].slice(0, fit);
+  const keep = ["mid", "iv", "oi", "delta", "volume", "bid", "ask"].slice(0, fit === 6 ? 5 : fit); // bid/ask only as a pair
   const cols = ALL.filter(([, k]) => keep.includes(k));
   optState.fit = fit;
   const cell = (l, k) => {
@@ -1355,7 +1390,7 @@ function renderOptions() {
       spotDone = true;
       line = `<tr class="spot-row"><td colspan="${(showC ? cols.length : 0) + 1 + (showP ? cols.length : 0)}"><span>Spot ${fmt(spot)}</span></td></tr>`;
     }
-    return line + `<tr>` +
+    return line + `<tr data-strike="${r.strike}">` +
       (showC ? side(r.call, true).replace(/<td/g, `<td class="c${r.strike < spot ? " itm" : ""}"`) : "") +
       `<td class="strike">${fmt(r.strike, r.strike % 1 ? 2 : 0)}</td>` +
       (showP ? side(r.put, false).replace(/<td/g, `<td class="p${r.strike > spot ? " itm" : ""}"`) : "") + `</tr>`;
@@ -1368,6 +1403,28 @@ function renderOptions() {
   // Center the at-the-money strikes in the scroll box.
   const wrap = $("#opt-table"), spotRow = $(".spot-row", wrap);
   if (spotRow) wrap.scrollTop = spotRow.offsetTop - wrap.clientHeight / 2;
+  if (optState.focus) focusContract();
+}
+
+// Jump to the contract picked in Biggest flow and blink it for a few seconds.
+function focusContract() {
+  const { strike, kind, expiration } = optState.focus;
+  const d = optState.data;
+  if (d.expiration !== expiration) return;
+  const tr = $(`.opt-table tr[data-strike="${strike}"]`);
+  if (!tr) {
+    if (optState.focus.widened) { optState.focus = null; return; }
+    optState.focus.widened = true; // strike lies outside the ±N window: fetch every strike for this view
+    loadOptions(state.symbol, expiration, 0);
+    return;
+  }
+  optState.focus = null;
+  const wrap = $("#opt-table");
+  wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+  wrap.scrollTo({ top: tr.offsetTop - wrap.clientHeight / 2 + tr.offsetHeight / 2, behavior: "smooth" });
+  const cells = [...tr.querySelectorAll(`td.${kind === "call" ? "c" : "p"}, td.strike`)];
+  cells.forEach((c) => { c.classList.remove("blink"); void c.offsetWidth; c.classList.add("blink"); });
+  setTimeout(() => cells.forEach((c) => c.classList.remove("blink")), 3400);
 }
 // Re-pick the chain's columns when the card width changes (sidebar/news column reflow, window resize).
 function refitOptions() {
@@ -1378,6 +1435,40 @@ function refitOptions() {
 }
 new ResizeObserver(refitOptions).observe($("#opt-table"));
 addEventListener("resize", refitOptions);
+// Biggest call / put contracts across all expirations — reference outside the near-the-money table.
+function renderFlow(flow, current) {
+  const el = $("#opt-flow");
+  if (!flow || (!flow.calls.length && !flow.puts.length)) { el.innerHTML = ""; return; }
+  const item = (x, kind) => `<button class="flow-item ${kind}${x.expiration === current ? " cur" : ""}" data-exp="${x.expiration}" data-strike="${x.strike}"
+      title="${kind === "call" ? "Call" : "Put"} ${fmt(x.strike, x.strike % 1 ? 2 : 0)} · ${shortDate(x.expiration)} (${x.dte}d) · ${fmt(x.mid)} premium · vol ${x.volume.toLocaleString()} / OI ${x.oi ? x.oi.toLocaleString() : "—"} — click to jump to it in the chain">
+      <span class="fl-k">${fmt(x.strike, x.strike % 1 ? 2 : 0)}${kind === "call" ? "C" : "P"}</span>
+      <span class="fl-e">${shortDate(x.expiration)}</span>
+      <span class="fl-p">$${big(x.premium)}</span>
+      <span class="fl-v">${big(x.volume)} vol · ${x.otm_pct >= 0 ? "+" : ""}${fmt(x.otm_pct, 1)}%${x.unusual ? ` <b class="fl-u">unusual</b>` : ""}</span>
+    </button>`;
+  const row = (label, list, kind) => list.length ? `<div class="flow-row"><span class="flow-lbl ${kind}">${label}</span><div class="flow-list">${list.map((x) => item(x, kind)).join("")}</div></div>` : "";
+  el.innerHTML = `<div class="sub-h">Biggest flow <span class="muted tiny" style="text-transform:none;letter-spacing:0;font-weight:500">all expirations · strikes within ±30% · by premium traded (vol × price × 100)${optState.data?.summary?.quoted ? "" : " · last session"}</span></div>`
+    + row("Calls", flow.calls, "call") + row("Puts", flow.puts, "put");
+}
+$("#opt-flow").addEventListener("click", (e) => {
+  const b = e.target.closest(".flow-item");
+  if (!b || !state.symbol || !optState.data) return;
+  const kind = b.classList.contains("call") ? "call" : "put";
+  optState.focus = { strike: +b.dataset.strike, kind, expiration: b.dataset.exp };
+  if (optState.view !== "both" && optState.view !== kind) { // the filter hides this side
+    optState.view = "both";
+    $$("#opt-view button").forEach((x) => x.classList.toggle("active", x.dataset.view === "both"));
+    if (b.dataset.exp === optState.data.expiration) return renderOptions();
+  }
+  if (b.dataset.exp === optState.data.expiration) focusContract();
+  else loadOptions(state.symbol, b.dataset.exp);
+});
+$("#opt-strikes").value = String(optState.strikes);
+$("#opt-strikes").addEventListener("change", (e) => {
+  optState.strikes = +e.target.value;
+  store.set("mp.optStrikes", optState.strikes);
+  if (state.symbol) loadOptions(state.symbol, optState.data?.expiration);
+});
 $("#opt-exp").addEventListener("change", (e) => state.symbol && loadOptions(state.symbol, e.target.value));
 $("#opt-view").addEventListener("click", (e) => {
   const b = e.target.closest("button");
@@ -1386,6 +1477,63 @@ $("#opt-view").addEventListener("click", (e) => {
   $$("#opt-view button").forEach((x) => x.classList.toggle("active", x === b));
   renderOptions();
 });
+
+/* ================================================================ corporate events */
+async function loadEvents(symbol) {
+  state.events = null;
+  $("#ev-card").hidden = false;
+  $("#events").innerHTML = `<div class="sk-line"></div><div class="sk-line" style="width:75%"></div><div class="sk-line" style="width:55%"></div>`;
+  try {
+    const ev = await api(`/api/events/${symbol}`);
+    if (symbol !== state.symbol) return;
+    state.events = ev;
+    renderEvents(ev);
+  } catch {
+    if (symbol === state.symbol) $("#ev-card").hidden = true;
+  }
+}
+function renderEvents(ev) {
+  const parts = [];
+  const e = ev.earnings;
+  if (e) {
+    const when = e.days === 0 ? "Today" : e.days === 1 ? "Tomorrow" : `in ${e.days} days`;
+    const range = e.eps_low != null && e.eps_high != null ? ` <span class="muted">(${fmt(e.eps_low)}–${fmt(e.eps_high)})</span>` : "";
+    parts.push(`<div class="ev-next ${e.days <= 7 ? "soon" : ""}">
+      <div class="ev-k">Next earnings <span class="ev-when">${when}</span></div>
+      <div class="ev-date">${shortDate(e.date)}${e.time ? ` <span class="muted">· ${e.time}</span>` : ""}</div>
+      <div class="ev-est">${e.eps_estimate != null ? `EPS est <b class="mono">${fmt(e.eps_estimate)}</b>${range}` : ""}${e.revenue_estimate ? ` · Rev est <b class="mono">$${big(e.revenue_estimate)}</b>` : ""}</div>
+    </div>`);
+  }
+  if (ev.history.length) {
+    parts.push(`<div class="ev-sec">Earnings history <span class="ev-sec-r">EPS vs est · surprise · next day</span></div><div class="ev-hist">${ev.history.map((h) => {
+      const beat = h.eps_estimate == null ? null : h.eps >= h.eps_estimate;
+      return `<div class="ev-row"><span class="muted">${shortDate(h.date)}</span>
+        <span class="mono">${fmt(h.eps)} <span class="muted">vs ${fmt(h.eps_estimate)}</span></span>
+        ${beat == null ? "<span></span>" : `<span class="ev-tag ${beat ? "up" : "down"}" title="${beat ? "Beat" : "Missed"} the EPS estimate">${h.surprise_pct != null ? pct(h.surprise_pct, 0) : beat ? "Beat" : "Miss"}</span>`}
+        <span class="ev-react ${cls(h.reaction_pct)}" title="Stock move on the first session after the report">${h.reaction_pct != null ? pct(h.reaction_pct, 1) : "—"}</span></div>`;
+    }).join("")}</div>`);
+  }
+  const d = ev.dividends;
+  if (d?.amount) {
+    const freq = { 1: "annual", 2: "semi-annual", 4: "quarterly", 12: "monthly" }[d.per_year] || `${d.per_year}×/yr`;
+    const px = state.lastPrice;
+    const upcoming = d.ex_date && new Date(d.ex_date + "T23:59:59") >= new Date();
+    parts.push(`<div class="ev-sec">Dividend</div><div class="ev-div">
+      <div><b class="mono">$${fmt(d.amount, d.amount < 0.1 ? 4 : 2)}</b> <span class="muted">${freq}</span>${d.raised ? ` <span class="ev-tag up">Raised</span>` : ""}</div>
+      <div class="muted tiny">$${fmt(d.annual)}/yr${px ? ` · ${fmt((d.annual / px) * 100)}% yield` : ""}</div>
+      <div class="tiny">${upcoming ? "Upcoming ex-div" : "Last ex-div"} <b>${shortDate(d.ex_date || d.last_ex_date)}</b>${d.pay_date ? ` · paid ${shortDate(d.pay_date)}` : ""}</div>
+    </div>`);
+  }
+  if (ev.filings.length) {
+    parts.push(`<div class="ev-sec">SEC filings</div><div class="ev-files">${ev.filings.map((f) => `
+      <a class="ev-file" href="${esc(f.url)}" target="_blank" rel="noopener">
+        <span class="ev-form">${esc(f.form)}</span><span class="ev-title">${esc(f.title)}</span><span class="muted tiny">${shortDate(f.date)}</span>
+      </a>`).join("")}</div>`);
+  }
+  if (ev.split) parts.push(`<div class="ev-split muted tiny">Last split: <b>${esc(ev.split.ratio)}</b> on ${shortDate(ev.split.date)}</div>`);
+  $("#ev-card").hidden = !parts.length;
+  $("#events").innerHTML = parts.join("");
+}
 
 const RISKS = {
   conservative: { label: "Conservative", desc: "Defined-risk only — credit/debit spreads, covered calls, cash-secured puts. Higher win-rate, smaller payoff." },
@@ -1966,6 +2114,7 @@ async function route() {
     state.source?.close();
     $("#stock-view").hidden = true;
     $("#home-view").hidden = false;
+    document.body.classList.remove("quote-docked"); // the observer sees no change when the card goes from off-screen to hidden
     document.title = "Maru Pulse";
     renderWatchlist();
     return;
@@ -1991,6 +2140,7 @@ async function route() {
   volSeries.setData([]);
   renderStar();
   renderWatchlist();
+  $("#ai-question").value = "";
   aiEmpty(symbol);
   state.signals = null;
   const saved = getTrade(symbol, state.risk);
@@ -1998,6 +2148,7 @@ async function route() {
   loadSignals(symbol);
   loadOptions(symbol);
   loadPositionsFor(symbol);
+  loadEvents(symbol);
   loadStockNews(symbol);
   loadOverview(symbol);
   loadNextEarnings(symbol);
