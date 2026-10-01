@@ -512,6 +512,7 @@ class AnalyzeRequest(BaseModel):
     symbol: str
     model: str | None = None
     question: str | None = None
+    lang: str | None = None  # UI language, e.g. "zh-Hant"
 
 
 def build_context(symbol: str) -> str:
@@ -596,6 +597,26 @@ after-hours / pre-market move, valuation, guidance or news themes, and "sell the
 factors the data supports and what you cannot verify (e.g. guidance or call commentary not in the data).)
 Then continue with the remaining sections, kept shorter. Write the whole response in the same language as the user's
 question (e.g. Traditional Chinese if they wrote in Traditional Chinese), keeping tickers and numbers as-is."""
+
+# The app's UI language (request field `lang`). English needs no note.
+LANG_NAMES = {"zh-Hant": "Traditional Chinese (繁體中文, as used in Taiwan and Hong Kong)"}
+
+
+def lang_note(lang: str | None, json_mode: bool = False) -> str:
+    """Prompt suffix asking for output in the user's app language; overrides other language instructions."""
+    name = LANG_NAMES.get(lang or "")
+    if not name:
+        return ""
+    if json_mode:
+        return (f"\n\nLanguage (the user's app language; overrides any other language instruction): write every "
+                f"human-readable string value (summary, setup, rationale, outlook, management, risks, notes, reasons, "
+                f"answers, catalysts, etc.) in {name}. Keep JSON keys and enumerated values exactly as specified in "
+                f"English (e.g. bullish/bearish/neutral, long/short/none, buy/sell, call/put, debit/credit, "
+                f"conservative/moderate/aggressive, hold/add/trim/roll/hedge/close/cut_loss/take_profit), plus tickers "
+                f"and numbers.")
+    return (f"\n\nLanguage (the user's app language; overrides any other language instruction): write the whole "
+            f"response in {name}. Keep the heading '### TL;DR' exactly as-is and translate the other section headings. "
+            f"In the TL;DR, state the stance as 看多 (Bullish), 中性 (Neutral) or 看空 (Bearish). Keep tickers and numbers as-is.")
 
 
 class OpenRouterError(Exception):
@@ -715,7 +736,7 @@ async def analyze(req: AnalyzeRequest, request: Request):
     model = req.model or DEFAULT_MODEL
     context = await run_in_threadpool(build_context, symbol)
     question = (req.question or "").strip()[:1000]
-    system = SYSTEM_PROMPT + ("\n\n" + QUESTION_PROMPT if question else "")
+    system = SYSTEM_PROMPT + ("\n\n" + QUESTION_PROMPT if question else "") + lang_note(req.lang)
     ask = f"\n\n## User's question\n{question}" if question else ""
     messages = [
         {"role": "system", "content": system},
@@ -788,6 +809,7 @@ class TradeRequest(BaseModel):
     model: str | None = None
     deep: bool = False
     risk: str = "moderate"  # conservative | moderate | aggressive
+    lang: str | None = None  # UI language, e.g. "zh-Hant"
 
 
 TRADE_PROMPT = """You are a disciplined professional trader and options strategist. Using ONLY the data provided,
@@ -929,7 +951,7 @@ async def trade_ideas(req: TradeRequest, request: Request):
             return
         yield sse("status", {"step": "model", "message": f"Asking {model} for trade setups…"})
         messages = [
-            {"role": "system", "content": TRADE_PROMPT},
+            {"role": "system", "content": TRADE_PROMPT + lang_note(req.lang, json_mode=True)},
             {"role": "user", "content": f"Symbol: {symbol}. Today: {datetime.now(NY):%Y-%m-%d}. Risk profile: {risk}.\n\n{context}"},
         ]
         ideas, usage, last_err = None, None, None
@@ -990,6 +1012,7 @@ class PositionsRequest(BaseModel):
     model: str | None = None
     question: str | None = None
     deep: bool = False
+    lang: str | None = None  # UI language, e.g. "zh-Hant"
 
 
 @app.get("/api/chain-meta/{symbol}")
@@ -1210,7 +1233,7 @@ async def positions_review(req: PositionsRequest, request: Request):
             yield sse("error", {"error": e.detail})
             return
         yield sse("status", {"step": "model", "message": f"Asking {model} to review…"})
-        messages = [{"role": "system", "content": REVIEW_PROMPT},
+        messages = [{"role": "system", "content": REVIEW_PROMPT + lang_note(req.lang, json_mode=True)},
                     {"role": "user", "content": f"Symbol: {symbol}. Today: {datetime.now(NY):%Y-%m-%d}.\n\n{context}"}]
         review, usage, last_err = None, None, None
         for attempt in range(2):
@@ -1530,7 +1553,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 def index():
     """Serve the page with CSS/JS URLs versioned by file mtime so browsers never run stale assets."""
     html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-    for name in ("style.css", "app.js"):
+    for name in ("style.css", "i18n.js", "app.js"):
         v = int((ROOT / "static" / name).stat().st_mtime)
         html = html.replace(f"/static/{name}", f"/static/{name}?v={v}")
     return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})

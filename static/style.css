@@ -89,6 +89,7 @@ body.quote-docked .top-quote { max-width: 360px; padding: 0 12px 0 6px; border-w
 .tq-sym { font-weight: 700; font-size: 14px; }
 .tq-px { font-weight: 600; font-size: 14px; }
 .tq-ch { min-width: 0; }
+.lang-btn { font: 600 13px Inter, sans-serif; color: var(--text-2); }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .icon-btn { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--border); background: transparent; cursor: pointer; color: var(--text-2); }
 .icon-btn:hover { border-color: var(--text-2); color: var(--text); }
@@ -761,7 +762,7 @@ body.chart-expanded { overflow: hidden; }
   .top-quote { flex-shrink: 1; min-width: 0; }
   body.quote-docked .search-trigger { flex: none; width: 38px; padding: 0; justify-content: center; }
   body.quote-docked .search-trigger span { display: none; }
-  body.quote-docked #theme-btn, .top-quote .avatar { display: none; } /* room for symbol + price on a 375px bar */
+  body.quote-docked #theme-btn, body.quote-docked #lang-btn, .top-quote .avatar { display: none; } /* room for symbol + price on a 375px bar */
   .top-quote { padding-left: 10px !important; }
   .account-btn { white-space: nowrap; }
   .set-grid { grid-template-columns: 1fr; }
