@@ -20,9 +20,9 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const ago = (iso) => {
   if (!iso) return "";
   const m = Math.max(1, Math.round((Date.now() - new Date(iso)) / 60000));
-  if (m < 60) return `${m}m ago`;
-  if (m < 1440) return `${Math.round(m / 60)}h ago`;
-  return `${Math.round(m / 1440)}d ago`;
+  if (m < 60) return t("{n}m ago", { n: m });
+  if (m < 1440) return t("{n}h ago", { n: Math.round(m / 60) });
+  return t("{n}d ago", { n: Math.round(m / 1440) });
 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -116,11 +116,11 @@ function nyNow() {
 }
 function marketStatus() {
   const { day, mins } = nyNow();
-  if (day === "Sat" || day === "Sun") return { key: "closed", label: "Market closed" };
-  if (mins >= 570 && mins < 960) return { key: "open", label: `Market open · closes in ${Math.floor((960 - mins) / 60)}h ${(960 - mins) % 60}m` };
-  if (mins >= 240 && mins < 570) return { key: "ext", label: "Pre-market" };
-  if (mins >= 960 && mins < 1200) return { key: "ext", label: "After hours" };
-  return { key: "closed", label: "Market closed" };
+  if (day === "Sat" || day === "Sun") return { key: "closed", label: t("Market closed") };
+  if (mins >= 570 && mins < 960) return { key: "open", label: t("Market open · closes in {h}h {m}m", { h: Math.floor((960 - mins) / 60), m: (960 - mins) % 60 }) };
+  if (mins >= 240 && mins < 570) return { key: "ext", label: t("Pre-market") };
+  if (mins >= 960 && mins < 1200) return { key: "ext", label: t("After hours") };
+  return { key: "closed", label: t("Market closed") };
 }
 function renderStatus() {
   const s = marketStatus();
@@ -138,6 +138,9 @@ function applyTheme(t) {
   chart.applyOptions(chartTheme());
   if (state.bars.length) renderChart(false);
 }
+$("#lang-btn").textContent = LANG === "en" ? "中" : "EN"; // shows the language you switch to
+$("#lang-btn").title = $("#lang-btn").ariaLabel = LANG === "en" ? "切換為繁體中文" : "Switch to English";
+$("#lang-btn").addEventListener("click", () => setLang(LANG === "en" ? "zh-Hant" : "en"));
 $("#theme-btn").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
 
 /* ================================================================ chart */
@@ -156,7 +159,7 @@ function chartTheme() {
 }
 // Built-in wheel handling is off (see chartWheel below); drag to pan, touch-pinch to zoom.
 const chart = LightweightCharts.createChart($("#chart"), {
-  autoSize: true, ...chartTheme(),
+  autoSize: true, ...chartTheme(), localization: { locale: LOCALE },
   handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
   handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true },
 });
@@ -191,7 +194,7 @@ function renderChart(fit = true) {
   const extC = css("--muted");
   priceSeries.setData(bars.map((b, i) => seriesPoint(b, bars[i - 1])));
   if (state.range === "1D" && state.prevClose) {
-    priceSeries.createPriceLine({ price: state.prevClose, color: css("--muted"), lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: "Prev close" });
+    priceSeries.createPriceLine({ price: state.prevClose, color: css("--muted"), lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: t("Prev close") });
   }
   drawLevels();
   volSeries.setData(bars.map((b) => ({ time: b.time, value: b.volume || 0, color: b.ext ? extC + "44" : (b.close >= b.open ? upC : downC) + "55" })));
@@ -285,7 +288,7 @@ function setChartExpanded(on) {
   $(".chart-card").classList.toggle("expanded", on);
   document.body.classList.toggle("chart-expanded", on);
   $("#fs-btn").classList.toggle("on", on);
-  $("#fs-btn").title = on ? "Exit expanded chart (Esc)" : "Expand chart to the full page";
+  $("#fs-btn").title = t(on ? "Exit expanded chart (Esc)" : "Expand chart to the full page");
   if (state.bars.length) requestAnimationFrame(() => fitChart());
 }
 $("#fs-btn").addEventListener("click", () => setChartExpanded(!$(".chart-card").classList.contains("expanded")));
@@ -335,27 +338,27 @@ function drawLevels() {
   levelLines = [];
   if (!state.showLevels) return;
   const add = (price, color, title, style = 1) => price != null && levelLines.push(priceSeries.createPriceLine({ price, color, title, lineStyle: style, lineWidth: 1, axisLabelVisible: true }));
-  const t = state.signals?.technicals;
+  const tech = state.signals?.technicals;
   const plan = state.trade?.stock_trade;
   // Your own position: average cost of shares, plus the AI review's stop / target.
   const held = (state.posEval?.rows || []).filter((r) => r.kind === "stock");
   if (held.length) {
     const sh = held.reduce((a, r) => a + r.qty, 0);
-    add(held.reduce((a, r) => a + r.qty * r.cost, 0) / sh, "#14b8a6", "Avg cost", 0);
+    add(held.reduce((a, r) => a + r.qty * r.cost, 0) / sh, "#14b8a6", t("Avg cost"), 0);
   }
   const rv = state.posReview && state.posReview.hash === posHash(state.positions || []) ? state.posReview : null;
   if (rv) {
-    add(rv.stop_loss, css("--down"), "My stop", 2);
-    add(rv.take_profit, css("--up"), "My target", 2);
+    add(rv.stop_loss, css("--down"), t("My stop"), 2);
+    add(rv.take_profit, css("--up"), t("My target"), 2);
   }
   if (plan && ["long", "short"].includes(plan.direction)) {
-    add(plan.entry_low, css("--accent"), "Entry", 0);
+    add(plan.entry_low, css("--accent"), t("Entry"), 0);
     if (plan.entry_high !== plan.entry_low) add(plan.entry_high, css("--accent"), "", 0);
-    add(plan.stop, css("--down"), "Stop", 0);
+    add(plan.stop, css("--down"), t("Stop"), 0);
     (plan.targets || []).forEach((x, i) => add(x, css("--up"), `T${i + 1}`, 0));
-  } else if (t) {
-    (t.resistance || []).slice(0, 2).forEach((x) => add(x, css("--down"), "R"));
-    (t.support || []).slice(0, 2).forEach((x) => add(x, css("--up"), "S"));
+  } else if (tech) {
+    (tech.resistance || []).slice(0, 2).forEach((x) => add(x, css("--down"), "R"));
+    (tech.support || []).slice(0, 2).forEach((x) => add(x, css("--up"), "S"));
   }
 }
 function setShowLevels(on) {
@@ -378,14 +381,14 @@ function renderRangeReturn() {
 }
 
 function fmtTime(t) {
-  if (typeof t === "string") return new Date(t + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-  return new Date(t * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+  if (typeof t === "string") return new Date(t + "T00:00:00Z").toLocaleDateString(LOCALE, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return new Date(t * 1000).toLocaleString(LOCALE, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
 }
 function setLegend(bar) {
   const b = bar || state.bars[state.bars.length - 1];
   if (!b) return ($("#legend").innerHTML = "");
   const c = cls(b.close - b.open);
-  $("#legend").innerHTML = `<span>${fmtTime(b.time)}</span><span><b>O</b>${fmt(b.open)}</span><span><b>H</b>${fmt(b.high)}</span><span><b>L</b>${fmt(b.low)}</span><span class="${c}"><b>C</b>${fmt(b.close)}</span><span><b>Vol</b>${big(b.volume)}</span>`;
+  $("#legend").innerHTML = `<span>${fmtTime(b.time)}</span><span><b>O</b>${fmt(b.open)}</span><span><b>H</b>${fmt(b.high)}</span><span><b>L</b>${fmt(b.low)}</span><span class="${c}"><b>C</b>${fmt(b.close)}</span><span><b>${t("Vol")}</b>${big(b.volume)}</span>`;
 }
 const barIndex = new Map();
 const timeKey = (t) => (typeof t === "object" ? `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}` : t);
@@ -541,9 +544,9 @@ function renderExt(e) {
   state.ext = e || null;
   const el = $("#q-ext");
   if (!e || e.price == null) { el.hidden = true; return; }
-  const t = e.time ? new Date(e.time * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) : "";
+  const t = e.time ? new Date(e.time * 1000).toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) : "";
   el.hidden = false;
-  el.innerHTML = `${e.kind === "pre" ? SUNRISE : MOON}<span class="lbl">${esc(e.label)}</span><span class="px">${fmt(e.price)}</span>
+  el.innerHTML = `${e.kind === "pre" ? SUNRISE : MOON}<span class="lbl">${esc(window.t(e.label))}</span><span class="px">${fmt(e.price)}</span>
     <span class="ch ${cls(e.change)}">${e.change >= 0 ? "+" : ""}${fmt(e.change)} (${pct(e.change_percent)})</span>${t ? `<span class="muted tiny">${t} ET</span>` : ""}`;
   if (state.posEval && e && state.posEval.rows.some((r) => r.kind === "stock")) renderPositions();
 }
@@ -576,7 +579,7 @@ function setPrice(price, change, changePct) {
   if (state.range === "1D" && state.bars.length) renderRangeReturn();
   const s = marketStatus();
   $("#q-updated").textContent = s.key === "open"
-    ? `Updated ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}`
+    ? t("Updated {time}", { time: new Date().toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit", second: "2-digit" }) })
     : s.key === "closed" ? "At last close" : s.label;
 }
 
@@ -680,13 +683,13 @@ $("#news-filter").addEventListener("click", (e) => {
 });
 
 async function loadStockNews(symbol, quiet = false) {
-  $("#stock-news-title").textContent = `${symbol} News`;
+  $("#stock-news-title").textContent = t("{sym} News", { sym: symbol });
   if (!quiet) $("#stock-news").innerHTML = skeleton(6);
   try {
     const items = await withRetry(() => api(`/api/news/${symbol}?limit=20`), { tries: 2 });
     if (symbol === state.symbol) $("#stock-news").innerHTML = newsHTML(items);
   } catch {
-    if (symbol === state.symbol && !quiet) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">No news found for ${esc(symbol)}.</div>`;
+    if (symbol === state.symbol && !quiet) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">${t("No news found for {sym}.", { sym: esc(symbol) })}</div>`;
   }
 }
 
@@ -706,14 +709,14 @@ const nyToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_
 function dayLabel(dateStr) {
   const today = nyToday();
   const tomorrow = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(Date.now() + 864e5));
-  const pretty = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-  return dateStr === today ? `Today · ${pretty}` : dateStr === tomorrow ? `Tomorrow · ${pretty}` : pretty;
+  const pretty = new Date(dateStr + "T12:00:00").toLocaleDateString(LOCALE, { weekday: "short", month: "short", day: "numeric" });
+  return dateStr === today ? `${t("Today")} · ${pretty}` : dateStr === tomorrow ? `${t("Tomorrow")} · ${pretty}` : pretty;
 }
 const fmtEtTime = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
 function countdown(ms) {
-  if (ms <= 0) return "now";
+  if (ms <= 0) return t("now");
   const m = Math.floor(ms / 6e4), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60);
-  return d ? `${d}d ${h}h` : h ? `${h}h ${m % 60}m` : `${m}m`;
+  return d ? t("{d}d {h}h", { d, h }) : h ? t("{h}h {m}m", { h, m: m % 60 }) : t("{m}m", { m });
 }
 
 state.cal = null;
@@ -744,9 +747,9 @@ function renderCalendarNext() {
   // Several critical releases often share a slot (e.g. GDP + Core PCE at 8:30 AM).
   const same = state.cal.economic.filter((e) => e.tier === "critical" && e.datetime === next.datetime);
   const v = next.values?.[0] || {};
-  const bits = same.length > 1 ? "" : [v.consensus && `Consensus ${v.consensus}`, v.previous && `Prev ${v.previous}`].filter(Boolean).join(" · ");
+  const bits = same.length > 1 ? "" : [v.consensus && t("Consensus {v}", { v: v.consensus }), v.previous && t("Prev {v}", { v: v.previous })].filter(Boolean).join(" · ");
   $("#cal-next").innerHTML = `<div class="cal-next"><span class="pulse"></span>
-    <div class="what"><b>Next critical: ${same.map((e) => esc(e.event)).join(" + ")}</b><span>${dayLabel(next.date)} · ${fmtEtTime(next.time)} ET${bits ? ` · ${esc(bits)}` : ""}</span></div>
+    <div class="what"><b>${t("Next critical: {ev}", { ev: same.map((e) => esc(e.event)).join(" + ") })}</b><span>${dayLabel(next.date)} · ${fmtEtTime(next.time)} ET${bits ? ` · ${esc(bits)}` : ""}</span></div>
     <div class="count">${countdown(etDate(next.datetime) - now)}<small>to release</small></div></div>`;
 }
 
@@ -769,7 +772,7 @@ function renderCalendar() {
   if (state.calTab === "economy") {
     const days = byDay(econ);
     for (const [date, rows] of Object.entries(days)) {
-      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${rows.length} event${rows.length > 1 ? "s" : ""}</span></div>`;
+      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${t(rows.length > 1 ? "{n} events" : "{n} event", { n: rows.length })}</span></div>`;
       html += rows.map((e) => {
         const past = etDate(e.datetime) < Date.now();
         const vals = e.values || [];
@@ -782,11 +785,11 @@ function renderCalendar() {
         </div>`;
       }).join("");
     }
-    if (!econ.length) html = `<div class="cal-empty">No ${state.calFilter === "critical" ? "critical" : "major"} US releases in the next 7 days.</div>`;
+    if (!econ.length) html = `<div class="cal-empty">${t(state.calFilter === "critical" ? "No critical US releases in the next 7 days." : "No major US releases in the next 7 days.")}</div>`;
   } else {
     const timeLbl = (t) => (t === "pre-market" ? "☀ Before open" : t === "after-hours" ? "☾ After close" : "Time TBA");
     for (const [date, rows] of Object.entries(byDay(earn))) {
-      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${rows.length} report${rows.length > 1 ? "s" : ""}</span></div>`;
+      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${t(rows.length > 1 ? "{n} reports" : "{n} report", { n: rows.length })}</span></div>`;
       html += rows.map((e) => `<div class="cal-row earn-row" data-sym="${esc(e.symbol)}">
           ${avatar(e.symbol, 30)}
           <span style="min-width:0"><b class="mono">${esc(e.symbol)}</b> ${e.watch ? `<span class="star" title="On your watchlist">★</span>` : ""}<div class="nm">${esc(e.name || "")}</div></span>
@@ -835,8 +838,8 @@ function upcomingItems() {
   const earn = (state.cal?.earnings || []).filter((e) => e.watch).map((e) => ({
     kind: "earnings", sym: e.symbol,
     at: etDate(`${e.date}T${e.time === "pre-market" ? "08:00" : e.time === "after-hours" ? "16:05" : "12:00"}`),
-    title: `${e.symbol} earnings`,
-    sub: `${dayLabel(e.date).split(" · ")[0]} · ${e.time === "pre-market" ? "before open" : e.time === "after-hours" ? "after close" : "time TBA"}`,
+    title: t("{sym} earnings", { sym: e.symbol }),
+    sub: `${dayLabel(e.date).split(" · ")[0]} · ${t(e.time === "pre-market" ? "before open" : e.time === "after-hours" ? "after close" : "time TBA")}`,
   }));
   const upcoming = [...econ, ...earn].filter((x) => x.at > now - 5 * 6e4).sort((a, b) => a.at - b.at);
   // Show the soonest item, plus the next critical release (or watchlist earnings) if the soonest isn't one.
@@ -873,9 +876,10 @@ async function loadNextEarnings(symbol) {
     const e = await api(`/api/next-earnings/${symbol}`);
     if (symbol !== state.symbol || !e.date) return;
     const days = Math.round((new Date(e.date + "T12:00:00") - new Date(nyToday() + "T12:00:00")) / 864e5);
-    const when = days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
-    const t = e.time === "pre-market" ? "before the open" : e.time === "after-hours" ? "after the close" : "";
-    el.innerHTML = `📅 Earnings ${when} · ${new Date(e.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}${t ? ` ${t}` : ""}${e.eps_consensus != null ? ` · EPS est. ${fmt(e.eps_consensus)}` : ""}`;
+    const when = days === 0 ? t("today") : days === 1 ? t("tomorrow") : t("in {n} days", { n: days });
+    const tm = e.time === "pre-market" ? t("before the open") : e.time === "after-hours" ? t("after the close") : "";
+    const date = new Date(e.date + "T12:00:00").toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+    el.innerHTML = `📅 ${t("Earnings {when} · {date}", { when, date })}${tm ? ` ${tm}` : ""}${e.eps_consensus != null ? ` · ${t("EPS est. {v}", { v: fmt(e.eps_consensus) })}` : ""}`;
     el.hidden = false;
   } catch {}
 }
@@ -891,7 +895,7 @@ async function loadIndices() {
       return `<div class="index-card" data-sym="${esc(q.symbol)}">
         <div class="ic-top"><span class="ic-name">${INDEX_META[q.symbol] || esc(q.name)}</span><span class="ic-sym mono">${esc(q.symbol)}</span></div>
         <div class="ic-top"><span class="ic-px">${fmt(q.price)}</span><span class="chg-chip ${cls(q.change_percent)}">${pct(q.change_percent)}</span></div>
-        ${q.ext ? `<div class="ic-ext">${esc(q.ext.label)} ${fmt(q.ext.price)} <span class="${cls(q.ext.change_percent)}">${pct(q.ext.change_percent)}</span></div>` : ""}
+        ${q.ext ? `<div class="ic-ext">${esc(t(q.ext.label))} ${fmt(q.ext.price)} <span class="${cls(q.ext.change_percent)}">${pct(q.ext.change_percent)}</span></div>` : ""}
         ${spark(state.sparks[q.symbol], { h: 44, ref: prev })}
       </div>`;
     }).join("");
@@ -945,7 +949,7 @@ function toggleWatch(sym) {
   renderWatchlist();
   if (adding) refreshWatchlist(true);
   loadCalendar(); // watchlist earnings feed the calendar and "Up next"
-  toast(adding ? `${sym} added to watchlist` : `${sym} removed from watchlist`, false);
+  toast(t(adding ? "{sym} added to watchlist" : "{sym} removed from watchlist", { sym }), false);
 }
 function renderStar() {
   const on = state.symbol && inWatchlist(state.symbol);
@@ -1052,7 +1056,7 @@ $("#top-quote").addEventListener("click", () => window.scrollTo({ top: 0, behavi
 function setSideCollapsed(on) {
   document.body.classList.toggle("side-collapsed", on);
   store.set("mp.sideCollapsed", on);
-  const lbl = on ? "Expand watchlist" : "Collapse watchlist";
+  const lbl = t(on ? "Expand watchlist" : "Collapse watchlist");
   $("#side-toggle").title = lbl;
   $("#side-toggle").setAttribute("aria-label", lbl);
   setTimeout(() => dispatchEvent(new Event("resize")), 220); // let the chart / options table refit after the transition
@@ -1096,7 +1100,7 @@ function renderOptions(items, q) {
   let idx = 0;
   const html = groups.filter(([, o]) => o.length).map(([g, o]) =>
     `<li class="grp">${g}</li>` + o.map(([s, n]) => `<li class="opt" data-i="${idx++}" data-sym="${esc(s)}">${avatar(s, 28)}<span class="sym">${esc(s)}</span><span class="nm">${esc(n)}</span><span class="go">↵</span></li>`).join("")).join("");
-  list.innerHTML = html || `<li class="none">No matches for “${esc(q)}”.</li>`;
+  list.innerHTML = html || `<li class="none">${t("No matches for “{q}”.", { q: esc(q) })}</li>`;
   searchSel = 0;
   highlight();
 }
@@ -1133,7 +1137,7 @@ input.addEventListener("keydown", (e) => {
 async function submitSearch(q) {
   clearTimeout(searchTimer);
   const req = ++searchReq;
-  list.innerHTML = `<li class="none">Searching “${esc(q)}”…</li>`;
+  list.innerHTML = `<li class="none">${t("Searching “{q}”…", { q: esc(q) })}</li>`;
   const items = await api(`/api/search?q=${encodeURIComponent(q)}`).catch(() => []);
   if (req !== searchReq || palette.hidden) return;
   const exact = items.find((i) => i.symbol === q.toUpperCase());
@@ -1191,9 +1195,9 @@ function aiEmpty(symbol) {
       <div class="ai-feed"><b>Live quote</b>Price, volume, moving averages, 52-week range</div>
       <div class="ai-feed"><b>Fundamentals</b>Valuation multiples, growth, margins, leverage</div>
       <div class="ai-feed"><b>Performance</b>1W · 1M · 3M · 6M · 1Y returns</div>
-      <div class="ai-feed"><b>Headlines</b>15 latest news stories on ${esc(symbol)}</div>
+      <div class="ai-feed"><b>Headlines</b>${t("{n} latest news stories on {sym}", { n: 15, sym: esc(symbol) })}</div>
       ${state.aiEnabled
-        ? `<div class="ai-note muted">Click <b>Analyze</b> for a structured research note on ${esc(symbol)} — typically under $0.001 per run.</div>`
+        ? `<div class="ai-note muted">${t("Click {btn} for a structured research note on {sym} — typically under $0.001 per run.", { btn: `<b>${t("Analyze")}</b>`, sym: esc(symbol) })}</div>`
         : `<div class="ai-note" style="grid-column:1/-1">${aiGateHTML("analysis")}</div>`}
     </div>`;
 }
@@ -1202,13 +1206,13 @@ function stanceOf(text) {
   // Prefer the TL;DR section: with a user question, the answer section comes first and may mention any stance.
   const sec = text.match(/###\s*TL;?DR([\s\S]*?)(?=\n###|$)/i);
   const tldr = (sec ? sec[1] : text.split(/###\s*News/i)[0] || text).toLowerCase();
-  const m = tldr.match(/\b(bullish|bearish|neutral)\b/);
-  return m ? m[1] : null;
+  const m = tldr.match(/\b(bullish|bearish|neutral)\b|看多|看空|中性/);
+  return m ? m[1] || { 看多: "bullish", 看空: "bearish", 中性: "neutral" }[m[0]] : null;
 }
 
 function showAnalysis(text, meta, streaming) {
   const stance = stanceOf(text);
-  const stanceHTML = stance ? `<span class="stance ${{ bullish: "bull", bearish: "bear", neutral: "neutral" }[stance]}">${{ bullish: "▲", bearish: "▼", neutral: "◆" }[stance]} ${stance[0].toUpperCase() + stance.slice(1)}</span>` : "";
+  const stanceHTML = stance ? `<span class="stance ${{ bullish: "bull", bearish: "bear", neutral: "neutral" }[stance]}">${{ bullish: "▲", bearish: "▼", neutral: "◆" }[stance]} ${t(stance[0].toUpperCase() + stance.slice(1))}</span>` : "";
   const bits = [meta?.model, meta?.completion_tokens ? `${meta.prompt_tokens + meta.completion_tokens} tokens` : null, meta?.cost != null ? `$${Number(meta.cost).toFixed(5)}` : null, meta?.at ? ago(meta.at) : null].filter(Boolean);
   $("#ai-body").innerHTML = `
     <div class="ai-meta">${stanceHTML}<span class="muted tiny">${esc(bits.join(" · "))}</span><span class="sp"></span>${!streaming ? `<button class="btn" id="copy-ai" style="height:30px;padding:0 10px;font-size:12px">Copy</button>` : ""}</div>
@@ -1228,7 +1232,7 @@ async function analyze() {
   let text = "", meta = { model, ...(question ? { question } : {}) };
   showAnalysis("", meta, true);
   try {
-    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model, question: question || null }) });
+    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model, question: question || null, lang: LANG }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", pending = false;
@@ -1258,7 +1262,7 @@ async function analyze() {
   } catch (e) {
     if (symbol !== state.symbol) return;
     text ? showAnalysis(text, meta, false) : aiEmpty(symbol);
-    toast(`AI analysis failed: ${e.message}`);
+    toast(t("AI analysis failed: {msg}", { msg: e.message }));
   } finally {
     btn.disabled = false;
   }
@@ -1270,7 +1274,7 @@ $("#ai-question").addEventListener("keydown", (e) => {
 
 /* ================================================================ trade opportunities */
 const money = (n, d = 0) => (n == null ? "∞" : `${n < 0 ? "-" : ""}$${fmt(Math.abs(n), d)}`);
-const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(LOCALE, { month: "short", day: "numeric", year: "2-digit" });
 
 async function loadSignals(symbol, quiet = false) {
   if (!quiet) {
@@ -1284,11 +1288,12 @@ async function loadSignals(symbol, quiet = false) {
     renderSignals();
     drawLevels();
   } catch (e) {
-    if (symbol === state.symbol && !quiet) $("#signals").innerHTML = `<div class="muted" style="grid-column:1/-1">Signals unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
+    if (symbol === state.symbol && !quiet) $("#signals").innerHTML = `<div class="muted" style="grid-column:1/-1">${t("Signals unavailable for {sym} ({msg}).", { sym: esc(symbol), msg: esc(e.message) })}</div>`;
   }
 }
 
 function renderSignals() {
+  const tr = window.t; // `t` is the technicals object in here
   const { technicals: t, options: o } = state.signals;
   const px = t.price;
   const rsiLbl = t.rsi14 >= 70 ? ["Overbought", "down"] : t.rsi14 <= 30 ? ["Oversold", "up"] : t.rsi14 >= 55 ? ["Bullish momentum", "up"] : t.rsi14 <= 45 ? ["Bearish momentum", "down"] : ["Neutral", ""];
@@ -1302,20 +1307,20 @@ function renderSignals() {
     const min = Math.min(lo, t.low_52w ?? lo) * 0.98, max = Math.max(hi, t.high_52w ?? hi) * 1.02;
     const pos = (v) => ((v - min) / (max - min)) * 100;
     emHTML = `<div class="v">±${fmt(exp.expected_move)} <span class="muted tiny">(±${fmt(exp.expected_move_pct, 1)}%)</span></div>
-      <div class="d">By ${shortDate(exp.expiration)} · range ${fmt(lo)} – ${fmt(hi)}</div>
+      <div class="d">${tr("By {date} · range {lo} – {hi}", { date: shortDate(exp.expiration), lo: fmt(lo), hi: fmt(hi) })}</div>
       <div class="em-bar" title="Options-implied 1σ range vs 52-week range"><span style="left:${pos(lo)}%;width:${pos(hi) - pos(lo)}%"></span><b style="left:${pos(px)}%"></b></div>`;
   }
   const tiles = [
     `<div class="sig"><div class="k">Trend</div><div class="v ${trendCls}">${esc(t.trend)}</div><div class="lv-row">${smaChips}</div></div>`,
     `<div class="sig"><div class="k">RSI 14 <span class="${rsiLbl[1]}">${rsiLbl[0]}</span></div><div class="v">${fmt(t.rsi14, 1)}</div><div class="gauge"><i style="left:${Math.min(100, Math.max(0, t.rsi14))}%"></i></div></div>`,
-    `<div class="sig"><div class="k">MACD <span class="${t.macd_cross === "bullish" ? "up" : "down"}">${t.macd_cross}</span></div><div class="v ${cls(t.macd_hist)}">${t.macd_hist >= 0 ? "+" : ""}${fmt(t.macd_hist, 3)}</div><div class="d">MACD ${fmt(t.macd, 2)} · signal ${fmt(t.macd_signal, 2)}</div></div>`,
-    `<div class="sig"><div class="k">ATR 14</div><div class="v">${fmt(t.atr14)}</div><div class="d">${fmt(t.atr_pct)}% daily range · vol ${fmt(t.vol_ratio)}× avg</div></div>`,
-    `<div class="sig wide"><div class="k">Key levels</div><div class="lv-row">${(t.resistance || []).slice().reverse().map((x) => `<span class="lv res">R ${fmt(x)}</span>`).join("")}<span class="lv px">● ${fmt(px)}</span>${(t.support || []).map((x) => `<span class="lv sup">S ${fmt(x)}</span>`).join("")}</div><div class="d" style="margin-top:6px">20-day ${fmt(t.low_20d)} – ${fmt(t.high_20d)} · 52-week ${fmt(t.low_52w)} – ${fmt(t.high_52w)}</div></div>`,
+    `<div class="sig"><div class="k">MACD <span class="${t.macd_cross === "bullish" ? "up" : "down"}">${tr(t.macd_cross)}</span></div><div class="v ${cls(t.macd_hist)}">${t.macd_hist >= 0 ? "+" : ""}${fmt(t.macd_hist, 3)}</div><div class="d">${tr("MACD {m} · signal {s}", { m: fmt(t.macd, 2), s: fmt(t.macd_signal, 2) })}</div></div>`,
+    `<div class="sig"><div class="k">ATR 14</div><div class="v">${fmt(t.atr14)}</div><div class="d">${tr("{atr}% daily range · vol {v}× avg", { atr: fmt(t.atr_pct), v: fmt(t.vol_ratio) })}</div></div>`,
+    `<div class="sig wide"><div class="k">Key levels</div><div class="lv-row">${(t.resistance || []).slice().reverse().map((x) => `<span class="lv res">R ${fmt(x)}</span>`).join("")}<span class="lv px">● ${fmt(px)}</span>${(t.support || []).map((x) => `<span class="lv sup">S ${fmt(x)}</span>`).join("")}</div><div class="d" style="margin-top:6px">${tr("20-day {a} – {b} · 52-week {c} – {d}", { a: fmt(t.low_20d), b: fmt(t.high_20d), c: fmt(t.low_52w), d: fmt(t.high_52w) })}</div></div>`,
     `<div class="sig wide"><div class="k">Expected move (options)</div>${emHTML}</div>`,
-    `<div class="sig"><div class="k">IV vs HV</div><div class="v">${o?.iv30 != null ? `${fmt(o.iv30, 1)}%` : "—"} <span class="muted tiny">/ ${fmt(t.hv20, 1)}%</span></div><div class="d">${o?.iv_hv_ratio ? `${fmt(o.iv_hv_ratio)}× · ${esc((o.vol_regime || "").split("(")[0])}` : "30d implied / 20d realized"}</div></div>`,
-    `<div class="sig"><div class="k">Put / Call OI</div><div class="v">${exp ? fmt(exp.put_call_oi) : "—"}</div><div class="d">${exp ? `${exp.put_call_oi > 1 ? "Put-heavy (hedging)" : "Call-heavy"} · vol P/C ${fmt(exp.put_call_volume)}` : ""}</div></div>`,
-    `<div class="sig wide"><div class="k">Largest open interest ${exp ? `· ${shortDate(exp.expiration)}` : ""}</div><div class="lv-row">${exp ? exp.top_call_oi.map((x) => `<span class="lv res">C ${fmt(x, x % 1 ? 1 : 0)}</span>`).join("") + exp.top_put_oi.map((x) => `<span class="lv sup">P ${fmt(x, x % 1 ? 1 : 0)}</span>`).join("") : "—"}</div><div class="d" style="margin-top:6px">Big OI strikes often act as magnets / walls near expiration.</div></div>`,
-    `<div class="sig wide"><div class="k">Momentum</div><div class="lv-row">${[["1W", t.ret_1w], ["1M", t.ret_1m], ["3M", t.ret_3m]].map(([k, v]) => `<span class="lv ${v >= 0 ? "sup" : "res"}">${k} ${pct(v)}</span>`).join("")}</div><div class="d" style="margin-top:6px">Close vs 20D high: ${pct((px / t.high_20d - 1) * 100)}</div></div>`,
+    `<div class="sig"><div class="k">IV vs HV</div><div class="v">${o?.iv30 != null ? `${fmt(o.iv30, 1)}%` : "—"} <span class="muted tiny">/ ${fmt(t.hv20, 1)}%</span></div><div class="d">${o?.iv_hv_ratio ? `${fmt(o.iv_hv_ratio)}× · ${esc(tr((o.vol_regime || "").split("(")[0].trim()))}` : "30d implied / 20d realized"}</div></div>`,
+    `<div class="sig"><div class="k">Put / Call OI</div><div class="v">${exp ? fmt(exp.put_call_oi) : "—"}</div><div class="d">${exp ? `${tr(exp.put_call_oi > 1 ? "Put-heavy (hedging)" : "Call-heavy")} · ${tr("vol P/C {v}", { v: fmt(exp.put_call_volume) })}` : ""}</div></div>`,
+    `<div class="sig wide"><div class="k">${tr("Largest open interest")} ${exp ? `· ${shortDate(exp.expiration)}` : ""}</div><div class="lv-row">${exp ? exp.top_call_oi.map((x) => `<span class="lv res">C ${fmt(x, x % 1 ? 1 : 0)}</span>`).join("") + exp.top_put_oi.map((x) => `<span class="lv sup">P ${fmt(x, x % 1 ? 1 : 0)}</span>`).join("") : "—"}</div><div class="d" style="margin-top:6px">Big OI strikes often act as magnets / walls near expiration.</div></div>`,
+    `<div class="sig wide"><div class="k">Momentum</div><div class="lv-row">${[["1W", t.ret_1w], ["1M", t.ret_1m], ["3M", t.ret_3m]].map(([k, v]) => `<span class="lv ${v >= 0 ? "sup" : "res"}">${k} ${pct(v)}</span>`).join("")}</div><div class="d" style="margin-top:6px">${tr("Close vs 20D high: {v}", { v: pct((px / t.high_20d - 1) * 100) })}</div></div>`,
   ];
   $("#signals").innerHTML = tiles.join("");
 }
@@ -1339,7 +1344,7 @@ async function loadOptions(symbol, expiration = null, strikes = optState.strikes
     optState.data = d;
     renderOptions();
   } catch (e) {
-    if (symbol === state.symbol && req === optState.req) $("#opt-table").innerHTML = `<div class="muted">Options unavailable for ${esc(symbol)} (${esc(e.message)}).</div>`;
+    if (symbol === state.symbol && req === optState.req) $("#opt-table").innerHTML = `<div class="muted">${t("Options unavailable for {sym} ({msg}).", { sym: esc(symbol), msg: esc(e.message) })}</div>`;
   }
 }
 function renderOptions() {
@@ -1347,14 +1352,14 @@ function renderOptions() {
   if (!d.expirations.length) {
     $("#opt-exp").hidden = true;
     $("#opt-stats").innerHTML = "";
-    $("#opt-table").innerHTML = `<div class="muted">No listed options for ${esc(state.symbol)}.</div>`;
+    $("#opt-table").innerHTML = `<div class="muted">${t("No listed options for {sym}.", { sym: esc(state.symbol) })}</div>`;
     return;
   }
   $("#opt-exp").hidden = false;
   $("#opt-exp").innerHTML = d.expirations.map((e) => `<option value="${e.expiration}">${shortDate(e.expiration)} · ${e.dte}d</option>`).join("");
   $("#opt-exp").value = d.expiration;
   const s = d.summary;
-  $("#opt-sub").textContent = `Chain by expiration · ${s.quoted ? "delayed mid-quotes" : "last trade prices (market closed)"}`;
+  $("#opt-sub").textContent = t("Chain by expiration · {src}", { src: t(s.quoted ? "delayed mid-quotes" : "last trade prices (market closed)") });
   renderFlow(d.flow, d.expiration);
   $("#opt-stats").innerHTML = [
     ["ATM IV", s.atm_iv != null ? `${fmt(s.atm_iv, 1)}%` : "—"],
@@ -1388,7 +1393,7 @@ function renderOptions() {
     let line = "";
     if (!spotDone && r.strike >= spot) {
       spotDone = true;
-      line = `<tr class="spot-row"><td colspan="${(showC ? cols.length : 0) + 1 + (showP ? cols.length : 0)}"><span>Spot ${fmt(spot)}</span></td></tr>`;
+      line = `<tr class="spot-row"><td colspan="${(showC ? cols.length : 0) + 1 + (showP ? cols.length : 0)}"><span>${t("Spot {px}", { px: fmt(spot) })}</span></td></tr>`;
     }
     return line + `<tr data-strike="${r.strike}">` +
       (showC ? side(r.call, true).replace(/<td/g, `<td class="c${r.strike < spot ? " itm" : ""}"`) : "") +
@@ -1399,7 +1404,7 @@ function renderOptions() {
     <thead><tr class="grp">${showC ? `<th colspan="${cols.length}" class="c">Calls</th>` : ""}<th></th>${showP ? `<th colspan="${cols.length}" class="p">Puts</th>` : ""}</tr>
     <tr>${showC ? head(true) : ""}<th class="strike">Strike</th>${showP ? head(false) : ""}</tr></thead>
     <tbody>${body}</tbody></table>
-    <p class="muted tiny opt-foot">Shaded cells are in the money. ${s.quoted ? "" : "* priced from last trade — no live bid/ask outside market hours. "}Δ is Black-Scholes delta from the contract's IV.</p>`;
+    <p class="muted tiny opt-foot">${t("Shaded cells are in the money.")} ${s.quoted ? "" : t("* priced from last trade — no live bid/ask outside market hours.") + " "}${t("Δ is Black-Scholes delta from the contract's IV.")}</p>`;
   // Center the at-the-money strikes in the scroll box.
   const wrap = $("#opt-table"), spotRow = $(".spot-row", wrap);
   if (spotRow) wrap.scrollTop = spotRow.offsetTop - wrap.clientHeight / 2;
@@ -1444,10 +1449,10 @@ function renderFlow(flow, current) {
       <span class="fl-k">${fmt(x.strike, x.strike % 1 ? 2 : 0)}${kind === "call" ? "C" : "P"}</span>
       <span class="fl-e">${shortDate(x.expiration)}</span>
       <span class="fl-p">$${big(x.premium)}</span>
-      <span class="fl-v">${big(x.volume)} vol · ${x.otm_pct >= 0 ? "+" : ""}${fmt(x.otm_pct, 1)}%${x.unusual ? ` <b class="fl-u">unusual</b>` : ""}</span>
+      <span class="fl-v">${t("{v} vol", { v: big(x.volume) })} · ${x.otm_pct >= 0 ? "+" : ""}${fmt(x.otm_pct, 1)}%${x.unusual ? ` <b class="fl-u">unusual</b>` : ""}</span>
     </button>`;
   const row = (label, list, kind) => list.length ? `<div class="flow-row"><span class="flow-lbl ${kind}">${label}</span><div class="flow-list">${list.map((x) => item(x, kind)).join("")}</div></div>` : "";
-  el.innerHTML = `<div class="sub-h">Biggest flow <span class="muted tiny" style="text-transform:none;letter-spacing:0;font-weight:500">all expirations · strikes within ±30% · by premium traded (vol × price × 100)${optState.data?.summary?.quoted ? "" : " · last session"}</span></div>`
+  el.innerHTML = `<div class="sub-h">Biggest flow <span class="muted tiny" style="text-transform:none;letter-spacing:0;font-weight:500">${t("all expirations · strikes within ±30% · by premium traded (vol × price × 100)")}${optState.data?.summary?.quoted ? "" : ` · ${t("last session")}`}</span></div>`
     + row("Calls", flow.calls, "call") + row("Puts", flow.puts, "put");
 }
 $("#opt-flow").addEventListener("click", (e) => {
@@ -1496,20 +1501,20 @@ function renderEvents(ev) {
   const parts = [];
   const e = ev.earnings;
   if (e) {
-    const when = e.days === 0 ? "Today" : e.days === 1 ? "Tomorrow" : `in ${e.days} days`;
+    const when = e.days === 0 ? t("Today") : e.days === 1 ? t("Tomorrow") : t("in {n} days", { n: e.days });
     const range = e.eps_low != null && e.eps_high != null ? ` <span class="muted">(${fmt(e.eps_low)}–${fmt(e.eps_high)})</span>` : "";
     parts.push(`<div class="ev-next ${e.days <= 7 ? "soon" : ""}">
       <div class="ev-k">Next earnings <span class="ev-when">${when}</span></div>
-      <div class="ev-date">${shortDate(e.date)}${e.time ? ` <span class="muted">· ${e.time}</span>` : ""}</div>
-      <div class="ev-est">${e.eps_estimate != null ? `EPS est <b class="mono">${fmt(e.eps_estimate)}</b>${range}` : ""}${e.revenue_estimate ? ` · Rev est <b class="mono">$${big(e.revenue_estimate)}</b>` : ""}</div>
+      <div class="ev-date">${shortDate(e.date)}${e.time ? ` <span class="muted">· ${t(e.time)}</span>` : ""}</div>
+      <div class="ev-est">${e.eps_estimate != null ? `${t("EPS est")} <b class="mono">${fmt(e.eps_estimate)}</b>${range}` : ""}${e.revenue_estimate ? ` · ${t("Rev est")} <b class="mono">$${big(e.revenue_estimate)}</b>` : ""}</div>
     </div>`);
   }
   if (ev.history.length) {
     parts.push(`<div class="ev-sec">Earnings history <span class="ev-sec-r">EPS vs est · surprise · next day</span></div><div class="ev-hist">${ev.history.map((h) => {
       const beat = h.eps_estimate == null ? null : h.eps >= h.eps_estimate;
       return `<div class="ev-row"><span class="muted">${shortDate(h.date)}</span>
-        <span class="mono">${fmt(h.eps)} <span class="muted">vs ${fmt(h.eps_estimate)}</span></span>
-        ${beat == null ? "<span></span>" : `<span class="ev-tag ${beat ? "up" : "down"}" title="${beat ? "Beat" : "Missed"} the EPS estimate">${h.surprise_pct != null ? pct(h.surprise_pct, 0) : beat ? "Beat" : "Miss"}</span>`}
+        <span class="mono">${fmt(h.eps)} <span class="muted">${t("vs")} ${fmt(h.eps_estimate)}</span></span>
+        ${beat == null ? "<span></span>" : `<span class="ev-tag ${beat ? "up" : "down"}" title="${t(beat ? "Beat the EPS estimate" : "Missed the EPS estimate")}">${h.surprise_pct != null ? pct(h.surprise_pct, 0) : beat ? "Beat" : "Miss"}</span>`}
         <span class="ev-react ${cls(h.reaction_pct)}" title="Stock move on the first session after the report">${h.reaction_pct != null ? pct(h.reaction_pct, 1) : "—"}</span></div>`;
     }).join("")}</div>`);
   }
@@ -1520,8 +1525,8 @@ function renderEvents(ev) {
     const upcoming = d.ex_date && new Date(d.ex_date + "T23:59:59") >= new Date();
     parts.push(`<div class="ev-sec">Dividend</div><div class="ev-div">
       <div><b class="mono">$${fmt(d.amount, d.amount < 0.1 ? 4 : 2)}</b> <span class="muted">${freq}</span>${d.raised ? ` <span class="ev-tag up">Raised</span>` : ""}</div>
-      <div class="muted tiny">$${fmt(d.annual)}/yr${px ? ` · ${fmt((d.annual / px) * 100)}% yield` : ""}</div>
-      <div class="tiny">${upcoming ? "Upcoming ex-div" : "Last ex-div"} <b>${shortDate(d.ex_date || d.last_ex_date)}</b>${d.pay_date ? ` · paid ${shortDate(d.pay_date)}` : ""}</div>
+      <div class="muted tiny">${t("{a}/yr", { a: `$${fmt(d.annual)}` })}${px ? ` · ${t("{y}% yield", { y: fmt((d.annual / px) * 100) })}` : ""}</div>
+      <div class="tiny">${t(upcoming ? "Upcoming ex-div" : "Last ex-div")} <b>${shortDate(d.ex_date || d.last_ex_date)}</b>${d.pay_date ? ` · ${t("paid {date}", { date: shortDate(d.pay_date) })}` : ""}</div>
     </div>`);
   }
   if (ev.filings.length) {
@@ -1530,7 +1535,7 @@ function renderEvents(ev) {
         <span class="ev-form">${esc(f.form)}</span><span class="ev-title">${esc(f.title)}</span><span class="muted tiny">${shortDate(f.date)}</span>
       </a>`).join("")}</div>`);
   }
-  if (ev.split) parts.push(`<div class="ev-split muted tiny">Last split: <b>${esc(ev.split.ratio)}</b> on ${shortDate(ev.split.date)}</div>`);
+  if (ev.split) parts.push(`<div class="ev-split muted tiny">${t("Last split:")} <b>${esc(ev.split.ratio)}</b> ${t("on {date}", { date: shortDate(ev.split.date) })}</div>`);
   $("#ev-card").hidden = !parts.length;
   $("#events").innerHTML = parts.join("");
 }
@@ -1553,7 +1558,7 @@ function setRisk(r, { reload = true } = {}) {
   store.set("mp.risk", r);
   schedulePrefsSync();
   $$("#risk-tabs button").forEach((b) => { b.classList.toggle("active", b.dataset.risk === r); b.setAttribute("aria-checked", b.dataset.risk === r); });
-  $("#risk-desc").textContent = RISKS[r].desc;
+  $("#risk-desc").textContent = t(RISKS[r].desc);
   if (!$("#trade-btn").disabled) $("#trade-btn span").textContent = "Generate ideas";
   $("#trade-btn").title = `Generate ${RISKS[r].label.toLowerCase()} trade ideas`;
   if (reload && state.symbol && !$("#trade-btn").disabled) {
@@ -1573,7 +1578,7 @@ function tradeEmpty() {
     return;
   }
   const others = Object.keys(RISKS).filter((k) => k !== r && sym && getTrade(sym, k));
-  $("#trade-body").innerHTML = `<div class="trade-empty">No <b>${RISKS[r].label.toLowerCase()}</b> ideas for <b>${esc(sym || "")}</b> yet — click <b>Generate ideas</b> (~1 min, under $0.01).
+  $("#trade-body").innerHTML = `<div class="trade-empty">${t("No {risk} ideas for {sym} yet — click {btn} (~1 min, under $0.01).", { risk: `<b>${t(RISKS[r].label.toLowerCase())}</b>`, sym: `<b>${esc(sym || "")}</b>`, btn: `<b>${t("Generate ideas")}</b>` })}
     ${others.length ? `<div class="others"><span class="muted tiny">Saved:</span>${others.map((k) => `<button class="chip" data-show-risk="${k}">${RISKS[k].label}</button>`).join("")}</div>` : ""}</div>`;
 }
 $("#trade-body").addEventListener("click", (e) => { const k = e.target.closest("[data-show-risk]")?.dataset.showRisk; if (k) setRisk(k); });
@@ -1598,7 +1603,7 @@ async function generateTrades() {
   renderProgress(prog, active, t0);
   const timer = setInterval(() => { if (active === "model") renderProgress(prog, active, t0); }, 1000);
   try {
-    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model: currentModel(), risk, deep: store.get("mp.deep", false) }) });
+    const r = await fetch("/api/trade-ideas", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model: currentModel(), risk, deep: store.get("mp.deep", false), lang: LANG }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -1623,13 +1628,13 @@ async function generateTrades() {
     if (!result) throw new Error("No result returned");
     store.set(tradeKey(symbol, risk), result);
     if (state.risk === risk) showTrade(result);
-    else toast(`${RISKS[risk].label} ideas for ${symbol} are ready`, false);
+    else toast(t("{risk} ideas for {sym} are ready", { risk: t(RISKS[risk].label), sym: symbol }), false);
   } catch (e) {
     if (symbol !== state.symbol) return;
     btn.disabled = false;
-    const t = getTrade(symbol, state.risk);
-    t ? showTrade(t) : tradeEmpty();
-    toast(`Trade ideas failed: ${e.message}`);
+    const saved = getTrade(symbol, state.risk);
+    saved ? showTrade(saved) : tradeEmpty();
+    toast(t("Trade ideas failed: {msg}", { msg: e.message }));
   } finally {
     clearInterval(timer);
     btn.disabled = false;
@@ -1642,7 +1647,7 @@ function confRing(v, color, label = "confidence") {
   const r = 32, c = 2 * Math.PI * r, p = Math.max(0, Math.min(100, v || 0));
   return `<div class="conf"><svg viewBox="0 0 76 76" width="76" height="76"><circle cx="38" cy="38" r="${r}" fill="none" stroke="var(--hover)" stroke-width="6"/>
     <circle cx="38" cy="38" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${(c * p) / 100} ${c}"/></svg>
-    <div class="n"><div>${p}<small>${label}</small></div></div></div>`;
+    <div class="n"><div>${p}<small>${t(label)}</small></div></div></div>`;
 }
 
 function payoffSVG(m, spot, id) {
@@ -1670,7 +1675,7 @@ function payoffSVG(m, spot, id) {
     <line x1="${X(spot)}" x2="${X(spot)}" y1="0" y2="${H}" stroke="var(--text)" stroke-dasharray="3 3" opacity=".5" vector-effect="non-scaling-stroke"/>
     ${be.map((b) => `<circle cx="${X(b)}" cy="${Y(0)}" r="3.5" fill="var(--warn)"/>`).join("")}
     <line class="hover" x1="-10" x2="-10" y1="0" y2="${H}" stroke="var(--accent)" vector-effect="non-scaling-stroke"/>
-  </svg><div class="tip">At expiry · spot ${fmt(spot)}</div></div>`;
+  </svg><div class="tip">${t("At expiry · spot {px}", { px: fmt(spot) })}</div></div>`;
 }
 
 // metricsById: { [payoff data-id]: metrics }
@@ -1701,7 +1706,7 @@ function optCardHTML(o, id, spot) {
   return `<div class="opt-card">
       <div><div class="t">${esc(o.name)}</div><div class="o">${esc(o.outlook || "")}</div></div>
       <div class="mgrid">
-        <div class="m"><div class="k">Net ${m.net_type || ""}</div><div class="v ${m.net_type === "credit" ? "up" : ""}">${money(Math.abs(m.net ?? 0))}</div></div>
+        <div class="m"><div class="k">${t(`Net ${m.net_type || ""}`.trim())}</div><div class="v ${m.net_type === "credit" ? "up" : ""}">${money(Math.abs(m.net ?? 0))}</div></div>
         <div class="m"><div class="k">Max profit</div><div class="v up">${m.max_profit == null ? "Unlimited" : money(m.max_profit)}</div></div>
         <div class="m"><div class="k">Max loss</div><div class="v down">${m.max_loss == null ? "Unlimited" : money(m.max_loss)}</div></div>
         <div class="m"><div class="k">Breakeven</div><div class="v be">${(m.breakevens || []).map((b) => fmt(b)).join(" / ") || "—"}</div></div>
@@ -1710,7 +1715,7 @@ function optCardHTML(o, id, spot) {
       </div>
       ${payoffSVG(m, spot, id)}
       <div class="legs-wrap"><table class="legs"><thead><tr><th></th><th>Qty</th><th>Contract</th><th>Mid</th><th>Δ</th><th>IV</th></tr></thead><tbody>
-        ${o.legs.map((l) => `<tr><td class="act ${l.action}">${l.action.toUpperCase()}</td><td>${l.qty}</td><td>${legLabel(l)}</td><td>${l.type === "stock" ? "" : fmt(l.mid)}</td><td>${l.delta != null ? fmt(l.delta) : ""}</td><td>${l.iv != null ? `${fmt(l.iv, 0)}%` : ""}</td></tr>`).join("")}
+        ${o.legs.map((l) => `<tr><td class="act ${l.action}">${t(l.action.toUpperCase())}</td><td>${l.qty}</td><td>${legLabel(l)}</td><td>${l.type === "stock" ? "" : fmt(l.mid)}</td><td>${l.delta != null ? fmt(l.delta) : ""}</td><td>${l.iv != null ? `${fmt(l.iv, 0)}%` : ""}</td></tr>`).join("")}
       </tbody></table></div>
       <details><summary>Why this trade · management · risks</summary>
         ${o.rationale ? `<p><b>Why:</b> ${esc(o.rationale)}</p>` : ""}${o.management ? `<p><b>Manage:</b> ${esc(o.management)}</p>` : ""}${o.risks ? `<p><b>Risk:</b> ${esc(o.risks)}</p>` : ""}
@@ -1721,7 +1726,7 @@ function optCardHTML(o, id, spot) {
 
 function legLabel(l) {
   if (l.type === "stock") return `${l.qty * 100} sh ${esc(state.symbol)} @ ${fmt(l.price)}`;
-  const d = new Date(l.expiration + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const d = new Date(l.expiration + "T12:00:00").toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
   return `${d} <b>${fmt(l.strike, l.strike % 1 ? 1 : 0)}${l.type === "call" ? "C" : "P"}</b> <span class="muted">${l.dte}d</span>`;
 }
 
@@ -1737,12 +1742,12 @@ function showTrade(d) {
   const sm = st.metrics || {};
   let plan = "";
   if (st.direction === "long" || st.direction === "short") {
-    const tg = (st.targets || []).map((x, i) => `<div class="lvl tgt"><div class="k">Target ${i + 1}</div><div class="v">${fmt(x)}</div><div class="d up">${pct(sm.targets_pct?.[i])} · ${sm.reward_risk?.[i] != null ? `${fmt(sm.reward_risk[i], 1)}R` : ""}</div></div>`).join("");
+    const tg = (st.targets || []).map((x, i) => `<div class="lvl tgt"><div class="k">${t("Target {n}", { n: i + 1 })}</div><div class="v">${fmt(x)}</div><div class="d up">${pct(sm.targets_pct?.[i])} · ${sm.reward_risk?.[i] != null ? `${fmt(sm.reward_risk[i], 1)}R` : ""}</div></div>`).join("");
     plan = `<div class="plan">
       <div class="plan-head"><span class="dir ${st.direction}">${st.direction === "long" ? "▲ LONG" : "▼ SHORT"}</span><b>${esc(st.setup || "")}</b><span class="muted tiny">· ${esc(st.timeframe || "")}</span>${st.conditional || Math.abs(sm.entry_vs_spot_pct ?? 0) > 1 ? `<span class="chip static">Limit entry · wait for zone</span>` : ""}</div>
       <div class="plan-grid">
-        <div class="lvl entry"><div class="k">Entry zone</div><div class="v">${fmt(st.entry_low)} – ${fmt(st.entry_high)}</div><div class="d muted">${pct(sm.entry_vs_spot_pct)} vs now</div></div>
-        <div class="lvl stop"><div class="k">Stop</div><div class="v">${fmt(st.stop)}</div><div class="d down">${pct(sm.stop_pct)} · risk ${money(sm.risk_per_share, 2)}/sh</div></div>
+        <div class="lvl entry"><div class="k">Entry zone</div><div class="v">${fmt(st.entry_low)} – ${fmt(st.entry_high)}</div><div class="d muted">${t("{p} vs now", { p: pct(sm.entry_vs_spot_pct) })}</div></div>
+        <div class="lvl stop"><div class="k">Stop</div><div class="v">${fmt(st.stop)}</div><div class="d down">${pct(sm.stop_pct)} · ${t("risk {r}/sh", { r: money(sm.risk_per_share, 2) })}</div></div>
         ${tg}
       </div>
       <dl class="kv"><dt>Rationale</dt><dd>${esc(st.rationale || "")}</dd><dt>Invalidation</dt><dd>${esc(st.invalidation || "")}</dd></dl>
@@ -1758,8 +1763,8 @@ function showTrade(d) {
   const list = (xs) => (xs || []).map((x) => `<li>${esc(x)}</li>`).join("");
   $("#trade-body").innerHTML = `
     <div class="thesis">${confRing(d.confidence, biasColor)}
-      <div><div class="thesis-top"><span class="stance ${{ bullish: "bull", bearish: "bear" }[bias] || "neutral"}">${{ bullish: "▲", bearish: "▼" }[bias] || "◆"} ${bias[0].toUpperCase() + bias.slice(1)}</span>
-        <span class="chip static">${esc(d.risk_profile || "")} risk</span><span class="muted tiny">${esc(meta)}</span></div>
+      <div><div class="thesis-top"><span class="stance ${{ bullish: "bull", bearish: "bear" }[bias] || "neutral"}">${{ bullish: "▲", bearish: "▼" }[bias] || "◆"} ${t(bias[0].toUpperCase() + bias.slice(1))}</span>
+        <span class="chip static">${esc(t("{r} risk", { r: t(d.risk_profile || "") }))}</span><span class="muted tiny">${esc(meta)}</span></div>
         <p>${esc(d.summary || "")}</p></div>
     </div>
     <div class="sub-h">Stock setup</div>${plan}
@@ -1773,8 +1778,8 @@ function showTrade(d) {
 function modelProgress(p, t0) {
   const secs = Math.round((Date.now() - t0) / 1000);
   const bits = [`${secs}s`];
-  if (p.thinking && !p.chars) bits.push(`thinking… ${(p.thinking / 1000).toFixed(1)}k chars`);
-  if (p.chars) bits.push(`writing ${p.chars} chars`);
+  if (p.thinking && !p.chars) bits.push(t("thinking… {n}k chars", { n: (p.thinking / 1000).toFixed(1) }));
+  if (p.chars) bits.push(t("writing {n} chars", { n: p.chars }));
   return ` <span class="muted tiny mono">${bits.join(" · ")}</span>`;
 }
 
@@ -1851,12 +1856,12 @@ function currentMark() {
 }
 function updatePosHint() {
   const m = currentMark();
-  if (posForm.kind === "stock") { $("#pos-form-hint").textContent = m != null ? `Current price: ${fmt(m)}` : ""; return; }
+  if (posForm.kind === "stock") { $("#pos-form-hint").textContent = m != null ? t("Current price: {px}", { px: fmt(m) }) : ""; return; }
   const e = state.chainMeta?.expirations.find((x) => x.expiration === $("#pos-exp").value);
   const live = e?.live?.[$("#pos-strike").value]?.[posForm.type];
   $("#pos-form-hint").textContent = m != null
-    ? `${live ? "Current mid" : "Last trade (no live quote)"}: ${fmt(m)} (${money(m * 100)} per contract)`
-    : "No trades yet for this contract — enter your cost";
+    ? t("{src}: {px} ({c} per contract)", { src: t(live ? "Current mid" : "Last trade (no live quote)"), px: fmt(m), c: money(m * 100) })
+    : t("No trades yet for this contract — enter your cost");
 }
 $("#pos-use-mark").addEventListener("click", () => { const m = currentMark(); if (m != null) $("#pos-cost").value = m; });
 
@@ -1909,7 +1914,7 @@ async function evaluatePositions() {
     renderPositions();
     if (ev.rows.some((r) => r.unpriced)) setTimeout(() => symbol === state.symbol && evaluatePositions(), 8000);
   } catch (e) {
-    if (symbol === state.symbol) $("#pos-body").innerHTML = `<div class="err">Couldn't price positions — ${esc(e.message)}</div>`;
+    if (symbol === state.symbol) $("#pos-body").innerHTML = `<div class="err">${t("Couldn't price positions — {msg}", { msg: esc(e.message) })}</div>`;
   }
 }
 
@@ -1930,11 +1935,11 @@ function renderPositions() {
   $("#pos-review").hidden = !state.positions.length;
   drawLevels();
   if (!state.positions.length) {
-    $("#pos-body").innerHTML = `<div class="pos-empty"><b>No position in ${esc(state.symbol)}</b><div class="muted tiny">Use <b>+ Add position</b> to enter the shares or option contracts you hold — you'll see live P/L, greeks and a combined payoff, and can ask AI to review it.</div></div>`;
+    $("#pos-body").innerHTML = `<div class="pos-empty"><b>${t("No position in {sym}", { sym: esc(state.symbol) })}</b><div class="muted tiny">${t("Use {btn} to enter the shares or option contracts you hold — you'll see live P/L, greeks and a combined payoff, and can ask AI to review it.", { btn: `<b>${t("+ Add position")}</b>` })}</div></div>`;
     return;
   }
   if (!ev) return;
-  const t = ev.total;
+  const tot = ev.total;
   const review = state.posReview && state.posReview.hash === posHash(state.positions) ? state.posReview : null;
   const actions = Object.fromEntries((review?.positions || []).map((p) => [p.index, p]));
   const rows = ev.rows.map((r) => {
@@ -1942,32 +1947,32 @@ function renderPositions() {
     const sub = r.unpriced ? `<span class="warn-note" style="margin:0">price unavailable</span>`
       : r.kind === "option"
       ? `${r.quoted === false ? "last" : "mid"} ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
-      : `now ${fmt(r.mark)}`;
+      : t("now {px}", { px: fmt(r.mark) });
     const a = actions[r.index];
     return `<tr>
       <td><div class="desc"><span class="kind ${r.side === "buy" ? "long" : "short"}">${r.side === "buy" ? "LONG" : "SHORT"}</span><div><b>${esc(r.label.replace(/^(Long|Short) /, ""))}</b><div class="sub">${sub}</div></div></div></td>
-      <td>${fmt(r.cost)}<div class="sub">${r.kind === "option" ? `${money(r.cost * 100)}/contract` : "per share"}</div></td>
+      <td>${fmt(r.cost)}<div class="sub">${r.kind === "option" ? t("{c}/contract", { c: money(r.cost * 100) }) : t("per share")}</div></td>
       <td>${money(r.market_value)}</td>
       <td class="${cls(r.pnl)}">${r.pnl >= 0 ? "+" : ""}${money(r.pnl)}</td>
       <td class="${cls(r.pnl_pct)}">${pct(r.pnl_pct, 1)}</td>
       <td>${fmt(r.delta, 0)}</td>
       <td class="${r.theta ? cls(r.theta) : ""}">${r.theta ? money(r.theta, 2) : "—"}</td>
       <td><button class="rm-btn" title="Remove" data-rm-pos="${r.index}">×</button></td>
-    </tr>${a ? `<tr class="act-row"><td colspan="8"><span class="act-chip ${ACTION_TONE[a.action] || "mid"}"><b>${esc(String(a.action).replace("_", " "))}</b>${esc(a.reason || "")}</span></td></tr>` : ""}`;
+    </tr>${a ? `<tr class="act-row"><td colspan="8"><span class="act-chip ${ACTION_TONE[a.action] || "mid"}"><b>${esc(t(String(a.action).replace("_", " ")))}</b>${esc(a.reason || "")}</span></td></tr>` : ""}`;
   }).join("");
   const p = ev.payoff;
   $("#pos-body").innerHTML = `
     <div class="pos-summary">
-      <div class="m"><div class="k">Market value</div><div class="v">${money(t.market_value)}</div><div class="ext-mini">cost ${money(t.cost_basis)}</div></div>
-      <div class="m"><div class="k">Unrealized P/L</div><div class="v ${cls(t.pnl)}">${t.pnl >= 0 ? "+" : ""}${money(t.pnl)} <span class="tiny">${pct(t.pnl_pct, 1)}</span></div>${extPnl(ev)}</div>
-      <div class="m" title="Share-equivalent exposure: P/L change per $1 move in the stock"><div class="k">Net delta</div><div class="v">${fmt(t.delta, 0)} <span class="tiny muted">sh</span></div></div>
-      <div class="m" title="Estimated P/L from one day of time decay"><div class="k">Theta / day</div><div class="v ${t.theta ? cls(t.theta) : ""}">${money(t.theta, 2)}</div></div>
+      <div class="m"><div class="k">Market value</div><div class="v">${money(tot.market_value)}</div><div class="ext-mini">${t("cost {c}", { c: money(tot.cost_basis) })}</div></div>
+      <div class="m"><div class="k">Unrealized P/L</div><div class="v ${cls(tot.pnl)}">${tot.pnl >= 0 ? "+" : ""}${money(tot.pnl)} <span class="tiny">${pct(tot.pnl_pct, 1)}</span></div>${extPnl(ev)}</div>
+      <div class="m" title="Share-equivalent exposure: P/L change per $1 move in the stock"><div class="k">Net delta</div><div class="v">${fmt(tot.delta, 0)} <span class="tiny muted">sh</span></div></div>
+      <div class="m" title="Estimated P/L from one day of time decay"><div class="k">Theta / day</div><div class="v ${tot.theta ? cls(tot.theta) : ""}">${money(tot.theta, 2)}</div></div>
     </div>
     <div class="pos-table-wrap"><table class="pos-table">
       <thead><tr><th>Position</th><th title="Average cost per share (options: premium per share, ×100 per contract)">Unit cost</th><th>Value</th><th>P/L</th><th>%</th><th>Δ</th><th>Θ/day</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-    ${p ? `<div class="pos-payoff"><div class="row"><b style="font-size:13px">Combined payoff at ${shortDate(p.horizon)}</b>
-      <span class="muted tiny">Breakeven ${(p.breakevens || []).map((b) => fmt(b)).join(" / ") || "—"} · Max profit ${p.max_profit == null ? "unlimited" : money(p.max_profit)} · Max loss ${p.max_loss == null ? "unlimited" : money(p.max_loss)} · P(profit) ${fmt(p.pop, 0)}%</span></div>
+    ${p ? `<div class="pos-payoff"><div class="row"><b style="font-size:13px">${t("Combined payoff at {date}", { date: shortDate(p.horizon) })}</b>
+      <span class="muted tiny">${t("Breakeven {be} · Max profit {mp} · Max loss {ml} · P(profit) {pop}%", { be: (p.breakevens || []).map((b) => fmt(b)).join(" / ") || "—", mp: p.max_profit == null ? t("unlimited") : money(p.max_profit), ml: p.max_loss == null ? t("unlimited") : money(p.max_loss), pop: fmt(p.pop, 0) })}</span></div>
       ${payoffSVG(p, ev.spot, "pos")}</div>` : ""}
     ${(ev.notes || []).map((n) => `<p class="muted tiny">↺ ${esc(n)}</p>`).join("")}`;
   if (p) bindPayoffs($("#pos-body"), { pos: p });
@@ -1991,7 +1996,7 @@ async function reviewPositions() {
   paint();
   const timer = setInterval(() => { if (active === "model") paint(); }, 1000);
   try {
-    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, positions: state.positions, question, model: currentModel(), deep: store.get("mp.deep", false) }) });
+    const r = await fetch("/api/positions/review", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, positions: state.positions, question, model: currentModel(), deep: store.get("mp.deep", false), lang: LANG }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
     const reader = r.body.getReader(), dec = new TextDecoder();
     let buf = "", result = null;
@@ -2022,7 +2027,7 @@ async function reviewPositions() {
   } catch (e) {
     if (symbol !== state.symbol) return;
     renderReview();
-    toast(`Review failed: ${e.message}`);
+    toast(t("Review failed: {msg}", { msg: e.message }));
   } finally {
     clearInterval(timer);
     btn.disabled = false;
@@ -2044,14 +2049,14 @@ function renderReview() {
   $("#pos-review-body").innerHTML = `
     ${stale ? `<div class="warn-note" style="margin:12px 0 0">⚠︎ Your positions changed since this review — run it again for an up-to-date view.</div>` : ""}
     <div class="thesis">${confRing(r.health, color, "health")}
-      <div><div class="thesis-top"><span class="verdict ${tone}">${esc(r.verdict || "")}</span><span class="muted tiny">${esc(meta)}</span></div>
+      <div><div class="thesis-top"><span class="verdict ${tone}">${esc(t(r.verdict || ""))}</span><span class="muted tiny">${esc(meta)}</span></div>
       <p>${esc(r.summary || "")}</p></div>
     </div>
     ${r.answer && r.question ? `<div class="answer"><div class="q">“${esc(r.question)}”</div>${esc(r.answer)}</div>` : ""}
     <div class="sub-h">Exit plan</div>
     <div class="levels-grid">
-      ${lvl("Stop loss", r.stop_loss, "stop", r.stop_loss && r.spot ? pct((r.stop_loss / r.spot - 1) * 100) + " from ref" : "")}
-      ${lvl("Take profit", r.take_profit, "tgt", r.take_profit && r.spot ? pct((r.take_profit / r.spot - 1) * 100) + " from ref" : "")}
+      ${lvl("Stop loss", r.stop_loss, "stop", r.stop_loss && r.spot ? t("{p} from ref", { p: pct((r.stop_loss / r.spot - 1) * 100) }) : "")}
+      ${lvl("Take profit", r.take_profit, "tgt", r.take_profit && r.spot ? t("{p} from ref", { p: pct((r.take_profit / r.spot - 1) * 100) }) : "")}
       <div class="lvl entry"><div class="k">Watch levels</div>${(r.watch_levels || []).map((w) => `<div class="d" style="margin-top:4px"><b class="mono">${fmt(w.price)}</b> <span class="muted">${esc(w.why || "")}</span></div>`).join("") || `<div class="v">—</div>`}</div>
     </div>
     ${r.risk_flags?.length ? `<div class="sub-h">Risk flags</div><ul class="flags">${r.risk_flags.map((f) => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
@@ -2168,7 +2173,7 @@ async function route() {
     startStream(symbol);
   } catch {
     if (symbol !== state.symbol) return;
-    $("#q-name").innerHTML = `<span class="err">Couldn't load a quote for “${esc(symbol)}” — the data source may be busy, or the ticker may not exist.</span> <button class="link-btn" onclick="route()">Retry</button>`;
+    $("#q-name").innerHTML = `<span class="err">${t("Couldn't load a quote for “{sym}” — the data source may be busy, or the ticker may not exist.", { sym: esc(symbol) })}</span> <button class="link-btn" onclick="route()">${t("Retry")}</button>`;
     $("#stats").innerHTML = "";
   }
 }
@@ -2196,9 +2201,10 @@ function refreshAiAvailability() {
 // Shown wherever AI is unavailable: tells the user exactly what's missing.
 function aiGateHTML(what) {
   if (!state.cfg) return "";
-  if (!sb) return `<div class="ai-note warn">AI ${what} needs the server's Supabase settings (see README).</div>`;
-  if (!state.user) return `<div class="ai-gate">Sign in and add your own OpenRouter API key to use AI ${what}. <button class="btn primary" onclick="openAuth()">Sign in</button></div>`;
-  return `<div class="ai-gate">Add your OpenRouter API key to use AI ${what}. <button class="btn primary" onclick="openSettings()">Add API key</button></div>`;
+  what = t(what);
+  if (!sb) return `<div class="ai-note warn">${t("AI {what} needs the server's Supabase settings (see README).", { what })}</div>`;
+  if (!state.user) return `<div class="ai-gate">${t("Sign in and add your own OpenRouter API key to use AI {what}.", { what })} <button class="btn primary" onclick="openAuth()">${t("Sign in")}</button></div>`;
+  return `<div class="ai-gate">${t("Add your OpenRouter API key to use AI {what}.", { what })} <button class="btn primary" onclick="openSettings()">${t("Add API key")}</button></div>`;
 }
 function promptAiSetup() {
   if (!state.user) return openAuth();
@@ -2243,7 +2249,7 @@ function renderAccount() {
   b.innerHTML = !u ? "<span>Sign in</span>"
     : pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${esc(displayName(u)[0].toUpperCase())}'))">`
     : `<span>${esc(displayName(u)[0].toUpperCase())}</span>`;
-  b.title = u ? `${displayName(u)} — Settings` : "Sign in with Google";
+  b.title = u ? t("{name} — Settings", { name: displayName(u) }) : t("Sign in with Google");
 }
 $("#account-btn").addEventListener("click", () => (state.user ? openSettings() : openAuth()));
 
@@ -2252,7 +2258,7 @@ function openSettings() {
   if (!state.user) return openAuth();
   const u = state.user, pic = avatarUrl(u);
   $("#set-user").innerHTML = `${pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc(displayName(u)[0].toUpperCase())}</span>`}
-    <div><b>${esc(displayName(u))}</b><div class="muted tiny">${esc(u.email || "")} · Google account · data syncs across devices</div></div>`;
+    <div><b>${esc(displayName(u))}</b><div class="muted tiny">${t("{email} · Google account · data syncs across devices", { email: esc(u.email || "") })}</div></div>`;
   renderKeyStatus();
   $$("#pref-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (document.documentElement.dataset.theme === "light" ? "light" : "dark")));
   $("#pref-ext").checked = state.showExt;
@@ -2272,7 +2278,7 @@ $("#pref-levels").addEventListener("change", (e) => setShowLevels(e.target.check
 function renderKeyStatus() {
   const k = state.byok;
   $("#key-status").innerHTML = k
-    ? `<span class="ok">✓ Key saved</span><span class="mono">sk-or-…${esc(k.key_hint)}</span><span class="muted tiny">updated ${ago(k.updated_at)}</span><span class="sp"></span><button class="link-btn" id="key-remove" type="button" style="padding:0;color:var(--down)">Remove</button>`
+    ? `<span class="ok">✓ Key saved</span><span class="mono">sk-or-…${esc(k.key_hint)}</span><span class="muted tiny">${t("updated {ago}", { ago: ago(k.updated_at) })}</span><span class="sp"></span><button class="link-btn" id="key-remove" type="button" style="padding:0;color:var(--down)">Remove</button>`
     : `<span class="none">No key saved</span><span class="muted tiny">AI analysis, trade ideas and position reviews are off until you add one.</span>`;
   $("#key-input").placeholder = k ? "Paste a new key to replace it" : "sk-or-v1-…";
   $("#key-remove")?.addEventListener("click", removeKey);
@@ -2311,7 +2317,7 @@ $("#key-form").addEventListener("submit", async (e) => {
   }
 });
 async function removeKey() {
-  if (!confirm("Remove your saved OpenRouter key? AI features will be off until you add one again.")) return;
+  if (!confirm(t("Remove your saved OpenRouter key? AI features will be off until you add one again."))) return;
   const { error } = await sb.rpc("delete_api_key", { p_provider: "openrouter" });
   if (error) return toast(error.message);
   await fetch("/api/byok/refresh", { method: "POST", headers: await authHeaders() });
@@ -2406,7 +2412,7 @@ async function initAuth(cfg) {
     const prev = state.user?.id || null, next = session?.user || null;
     state.user = next;
     renderAccount();
-    if (next && next.id !== handled) { handled = next.id; await syncOnLogin(); toast(`Signed in as ${displayName(next)}`, false); }
+    if (next && next.id !== handled) { handled = next.id; await syncOnLogin(); toast(t("Signed in as {name}", { name: displayName(next) }), false); }
     if (!next && prev) { handled = null; onLogout(); }
     refreshAiAvailability();
   };
@@ -2435,7 +2441,7 @@ const fromPosRow = (r) => ({ id: r.id, kind: r.kind, side: r.side, qty: +r.qty, 
   ...(r.kind === "option" ? { type: r.option_type, strike: +r.strike, expiration: r.expiration } : {}) });
 
 /* ================================================================ boot */
-$("#today").textContent = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+$("#today").textContent = new Date().toLocaleDateString(LOCALE, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 renderStatus();
 renderWatchlist();
 renderRecent();
