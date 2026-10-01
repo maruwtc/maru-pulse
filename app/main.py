@@ -706,8 +706,8 @@ async def user_openrouter_key(user_id: str) -> str | None:
     return key
 
 
-async def require_ai_key(request: Request) -> str:
-    """AI features use the signed-in user's own OpenRouter key (BYOK)."""
+async def require_ai_key(request: Request) -> tuple[str, str]:
+    """AI features use the signed-in user's own OpenRouter key (BYOK). Returns (key, user id)."""
     if not (SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY and SUPABASE_SECRET_KEY):
         raise HTTPException(503, "Server is missing Supabase settings (SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY / SUPABASE_SECRET_KEY).")
     user = await current_user(request)
@@ -716,7 +716,45 @@ async def require_ai_key(request: Request) -> str:
     key = await user_openrouter_key(user["id"])
     if not key:
         raise HTTPException(400, "Add your OpenRouter API key in Settings to use AI features.")
-    return key
+    return key, user["id"]
+
+
+# ---------------------------------------------------------------- AI audit log
+_audit_tasks: set[asyncio.Task] = set()
+
+
+class AiAudit:
+    """One row in the append-only `ai_generations` table, written when the generation ends — however it ends.
+
+    Handlers fill in fields as they go; `finish()` is called from a `finally`, so errors and client
+    disconnects (status "cancelled") are recorded too. Writing never blocks or fails the user's request."""
+
+    def __init__(self, kind: str, symbol: str, user_id: str, model: str, lang: str | None, request: dict):
+        self.started = time.time()
+        self.row = {"kind": kind, "symbol": symbol, "user_id": user_id, "model": model, "lang": lang,
+                    "request": request, "messages": None, "output": None, "result": None, "usage": None,
+                    "status": "cancelled", "error": None}
+
+    def finish(self):
+        self.row["duration_ms"] = int((time.time() - self.started) * 1000)
+        task = asyncio.get_running_loop().create_task(self._write(dict(self.row)))
+        _audit_tasks.add(task)  # keep a reference until it's done
+        task.add_done_callback(_audit_tasks.discard)
+
+    @staticmethod
+    async def _write(row: dict):
+        if not (SUPABASE_URL and SUPABASE_SECRET_KEY):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(f"{SUPABASE_URL}/rest/v1/ai_generations",
+                                      headers={"apikey": SUPABASE_SECRET_KEY, "Authorization": f"Bearer {SUPABASE_SECRET_KEY}",
+                                               "Content-Type": "application/json", "Prefer": "return=minimal"},
+                                      content=json.dumps(row, default=str))
+            if r.status_code >= 300:
+                log.warning("AI audit write failed (%s): %s", r.status_code, r.text[:200])
+        except httpx.HTTPError as e:
+            log.warning("AI audit write failed: %s", e)
 
 
 @app.post("/api/byok/refresh")
@@ -731,7 +769,7 @@ async def byok_refresh(request: Request):
 
 @app.post("/api/analyze")
 async def analyze(req: AnalyzeRequest, request: Request):
-    api_key = await require_ai_key(request)
+    api_key, user_id = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     context = await run_in_threadpool(build_context, symbol)
@@ -742,17 +780,27 @@ async def analyze(req: AnalyzeRequest, request: Request):
         {"role": "system", "content": system},
         {"role": "user", "content": f"Analyze {symbol}. Today is {datetime.now(NY):%Y-%m-%d %H:%M} ET.\n\n{context}{ask}"},
     ]
+    audit = AiAudit("analysis", symbol, user_id, model, req.lang, {"question": question or None})
+    audit.row["messages"] = messages
 
     async def gen():
+        text = ""
         try:
             async for kind, value in openrouter_stream(api_key, messages, model):
                 if kind == "usage":
+                    audit.row["usage"] = value
                     yield sse("usage", value)
                 elif kind == "text":
+                    text += value
                     yield sse(None, {"text": value})
+            audit.row["status"] = "ok"
         except (OpenRouterError, httpx.HTTPError) as e:
+            audit.row.update(status="error", error=str(e))
             yield sse("error", {"error": str(e)})
             return
+        finally:
+            audit.row["output"] = text
+            audit.finish()
         yield sse("done", {})
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
@@ -937,16 +985,25 @@ def enrich_ideas(ideas: dict, ctx: dict) -> dict:
 
 @app.post("/api/trade-ideas")
 async def trade_ideas(req: TradeRequest, request: Request):
-    api_key = await require_ai_key(request)
+    api_key, user_id = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     risk = req.risk if req.risk in ("conservative", "moderate", "aggressive") else "moderate"
+    audit = AiAudit("trade_ideas", symbol, user_id, model, req.lang, {"risk": risk, "deep": req.deep})
 
     async def gen():
+        try:
+            async for event in run():
+                yield event
+        finally:
+            audit.finish()
+
+    async def run():
         yield sse("status", {"step": "data", "message": "Pulling quote, technicals and option chain from OpenBB…"})
         try:
             context, ctx = await run_in_threadpool(build_trade_context, symbol)
         except HTTPException as e:
+            audit.row.update(status="error", error=str(e.detail))
             yield sse("error", {"error": e.detail})
             return
         yield sse("status", {"step": "model", "message": f"Asking {model} for trade setups…"})
@@ -954,6 +1011,7 @@ async def trade_ideas(req: TradeRequest, request: Request):
             {"role": "system", "content": TRADE_PROMPT + lang_note(req.lang, json_mode=True)},
             {"role": "user", "content": f"Symbol: {symbol}. Today: {datetime.now(NY):%Y-%m-%d}. Risk profile: {risk}.\n\n{context}"},
         ]
+        audit.row["messages"] = messages
         ideas, usage, last_err = None, None, None
         for attempt in range(2):  # retry once if the model returns malformed / incomplete JSON
             text = ""
@@ -969,8 +1027,10 @@ async def trade_ideas(req: TradeRequest, request: Request):
                         text += value
                         yield sse("progress", {"thinking": thinking, "chars": len(text), "attempt": attempt + 1})
             except (OpenRouterError, httpx.HTTPError) as e:
+                audit.row.update(status="error", error=str(e), output=text or None, usage=usage)
                 yield sse("error", {"error": str(e)})
                 return
+            audit.row.update(output=text, usage=usage)
             try:
                 parsed = parse_json(text)
                 if "stock_trade" not in parsed or "bias" not in parsed:
@@ -981,12 +1041,14 @@ async def trade_ideas(req: TradeRequest, request: Request):
                 last_err = e
                 yield sse("status", {"step": "model", "message": "Model output was malformed — retrying…"})
         if ideas is None:
+            audit.row.update(status="error", error=f"Could not parse model output ({last_err})")
             yield sse("error", {"error": f"Could not parse model output ({last_err}). Try again or pick another model."})
             return
         yield sse("status", {"step": "validate", "message": "Validating contracts and computing payoffs…"})
         ideas = await run_in_threadpool(enrich_ideas, ideas, ctx)
         ideas["risk_profile"] = risk
         ideas["usage"] = usage
+        audit.row.update(status="ok", result=ideas)
         yield sse("result", ideas)
         yield sse("done", {})
 
@@ -1219,22 +1281,33 @@ def build_review_context(symbol: str, positions: list[Position], question: str |
 
 @app.post("/api/positions/review")
 async def positions_review(req: PositionsRequest, request: Request):
-    api_key = await require_ai_key(request)
+    api_key, user_id = await require_ai_key(request)
     symbol = req.symbol.upper()
     model = req.model or DEFAULT_MODEL
     if not req.positions:
         raise HTTPException(400, "Add at least one position first.")
+    audit = AiAudit("position_review", symbol, user_id, model, req.lang,
+                    {"question": req.question, "deep": req.deep, "positions": [p.model_dump() for p in req.positions]})
 
     async def gen():
+        try:
+            async for event in run():
+                yield event
+        finally:
+            audit.finish()
+
+    async def run():
         yield sse("status", {"step": "data", "message": "Marking positions to market…"})
         try:
             context, ctx = await run_in_threadpool(build_review_context, symbol, req.positions, req.question)
         except HTTPException as e:
+            audit.row.update(status="error", error=str(e.detail))
             yield sse("error", {"error": e.detail})
             return
         yield sse("status", {"step": "model", "message": f"Asking {model} to review…"})
         messages = [{"role": "system", "content": REVIEW_PROMPT + lang_note(req.lang, json_mode=True)},
                     {"role": "user", "content": f"Symbol: {symbol}. Today: {datetime.now(NY):%Y-%m-%d}.\n\n{context}"}]
+        audit.row["messages"] = messages
         review, usage, last_err = None, None, None
         for attempt in range(2):
             text = ""
@@ -1250,8 +1323,10 @@ async def positions_review(req: PositionsRequest, request: Request):
                         text += value
                         yield sse("progress", {"thinking": thinking, "chars": len(text)})
             except (OpenRouterError, httpx.HTTPError) as e:
+                audit.row.update(status="error", error=str(e), output=text or None, usage=usage)
                 yield sse("error", {"error": str(e)})
                 return
+            audit.row.update(output=text, usage=usage)
             try:
                 review = parse_json(text)
                 if "verdict" not in review:
@@ -1261,6 +1336,7 @@ async def positions_review(req: PositionsRequest, request: Request):
                 review, last_err = None, e
                 yield sse("status", {"step": "model", "message": "Model output was malformed — retrying…"})
         if review is None:
+            audit.row.update(status="error", error=f"Could not parse model output ({last_err})")
             yield sse("error", {"error": f"Could not parse model output ({last_err}). Try again or pick another model."})
             return
         yield sse("status", {"step": "validate", "message": "Pricing suggested adjustments…"})
@@ -1276,6 +1352,7 @@ async def positions_review(req: PositionsRequest, request: Request):
                 adj.append(a)
         review["adjustments"] = adj
         review.update(spot=spot, usage=usage, question=req.question, generated_at=datetime.now(NY).isoformat())
+        audit.row.update(status="ok", result=review)
         yield sse("result", review)
         yield sse("done", {})
 
