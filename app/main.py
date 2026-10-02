@@ -576,6 +576,9 @@ def build_context(symbol: str) -> str:
     except HTTPException:
         pass
 
+    if cal := calendar_context(symbol):
+        parts.append(cal)
+
     return "\n\n".join(parts)
 
 
@@ -585,6 +588,7 @@ analysis in Markdown with these sections:
 ### News & Sentiment  (key themes from the headlines, sentiment per theme, what matters most)
 ### Price Action & Technicals  (trend vs 50/200-day averages, momentum, position in 52-week range)
 ### Fundamentals & Valuation  (valuation multiples, growth, margins, balance sheet)
+### Macro Backdrop  (recent US data like CPI / jobs vs consensus and upcoming critical releases, and what they mean for this stock)
 ### Bull Case / Bear Case  (bullets)
 ### Key Risks & Catalysts to Watch
 Be specific with numbers. Say when data is missing. End with a one-line reminder that this is not investment advice."""
@@ -1388,10 +1392,10 @@ def event_tier(name: str) -> str | None:
     return None
 
 
-def economic_calendar(days: int) -> list[dict]:
+def economic_releases(start: date, end: date) -> list[dict]:
+    """Critical / major US releases between two New York dates (inclusive), merged by release."""
     def load():
-        start = datetime.now(NY).date()
-        df = obb_call(obb.economy.calendar, provider="nasdaq", start_date=start, end_date=start + timedelta(days=days))
+        df = obb_call(obb.economy.calendar, provider="nasdaq", start_date=start, end_date=end)
         df = df[df["country"] == "United States"]
         grouped: dict[tuple, dict] = {}
         for r in df.itertuples():
@@ -1411,7 +1415,36 @@ def economic_calendar(days: int) -> list[dict]:
                 g["values"].append(vals)
         return sorted(grouped.values(), key=lambda x: (x["datetime"], x["tier"] != "critical", x["event"]))
 
-    return cached(f"econcal:{days}", 900, load)
+    return cached(f"econcal:{start}:{end}", 900, load)
+
+
+def economic_calendar(days: int) -> list[dict]:
+    start = datetime.now(NY).date()
+    return economic_releases(start, start + timedelta(days=days))
+
+
+def surprise(vals: dict) -> str | None:
+    """'above' / 'below' / 'inline' when actual and consensus are both numeric (e.g. "0.4%", "254K")."""
+    def num(x):
+        m = re.search(r"-?\d+(?:\.\d+)?", (x or "").replace(",", ""))
+        return float(m.group()) if m else None
+    unit = lambda x: re.sub(r"[-\d.,\s]", "", x or "")
+    a, c = num(vals.get("actual")), num(vals.get("consensus"))
+    if a is None or c is None or unit(vals.get("actual")) != unit(vals.get("consensus")):  # e.g. 1.2M vs 950K
+        return None
+    return "inline" if abs(a - c) < 1e-9 else "above" if a > c else "below"
+
+
+def recent_economic(days: int) -> list[dict]:
+    """Releases already out in the last `days` days (including earlier today), newest first, with surprise vs consensus."""
+    now = datetime.now(NY)
+    out = []
+    for ev in economic_releases(now.date() - timedelta(days=days), now.date()):
+        if datetime.fromisoformat(ev["datetime"]).replace(tzinfo=None) > now.replace(tzinfo=None):
+            continue
+        ev = dict(ev, values=[dict(v, surprise=surprise(v)) for v in ev["values"]])
+        out.append(ev)
+    return sorted(out, key=lambda x: (x["datetime"], x["tier"] == "critical"), reverse=True)
 
 
 def earnings_calendar(days: int) -> list[dict]:
@@ -1441,14 +1474,18 @@ def next_earnings(symbol: str, days: int = 21) -> dict | None:
 
 @app.get("/api/calendar")
 def calendar(days: int = 7, symbols: str = ""):
-    """Critical / major US economic releases and major earnings (plus any `symbols`, e.g. the watchlist)."""
+    """Critical / major US economic releases (upcoming and the last 7 days) and major earnings (plus any `symbols`, e.g. the watchlist)."""
     days = max(1, min(days, 14))
     watch = {x.strip().upper() for x in symbols.split(",") if x.strip()}
-    out = {"days": days, "economic": [], "earnings": [], "errors": []}
+    out = {"days": days, "economic": [], "recent": [], "earnings": [], "errors": []}
     try:
         out["economic"] = economic_calendar(days)
     except HTTPException as e:
         out["errors"].append(f"economic: {e.detail}")
+    try:
+        out["recent"] = recent_economic(7)
+    except HTTPException as e:
+        out["errors"].append(f"recent: {e.detail}")
     try:
         out["earnings"] = [dict(e, watch=e["symbol"] in watch) for e in earnings_calendar(days)
                            if (e["market_cap"] or 0) >= EARNINGS_MAJOR_CAP or e["symbol"] in watch]
@@ -1570,7 +1607,7 @@ def next_earnings_route(symbol: str):
 
 
 def calendar_context(symbol: str) -> str:
-    """Upcoming catalysts for AI prompts: the symbol's earnings date and critical US macro releases."""
+    """Catalysts for AI prompts: the symbol's earnings date, upcoming critical US macro releases and recent macro data."""
     lines = []
     e = next_earnings(symbol)
     if e:
@@ -1582,7 +1619,30 @@ def calendar_context(symbol: str) -> str:
                 lines.append(f"- {ev['date']} {ev['time']} ET {ev['event']} (consensus {v.get('consensus')}, prev {v.get('previous')})")
     except HTTPException:
         pass
-    return "## Upcoming catalysts\n" + "\n".join(lines[:12]) if lines else ""
+    out = "## Upcoming catalysts\n" + "\n".join(lines[:12]) if lines else ""
+    if recent := macro_recap_context():
+        out = f"{out}\n\n{recent}" if out else recent
+    return out
+
+
+def macro_recap_context(days: int = 7) -> str:
+    """Recently released US macro data (actual vs consensus) for AI prompts."""
+    try:
+        evs = recent_economic(days)
+    except HTTPException:
+        return ""
+    lines = []
+    for ev in evs:
+        for v in ev["values"][:1] or [{}]:
+            if not v.get("actual"):
+                continue
+            s = {"above": ", ABOVE consensus", "below": ", BELOW consensus", "inline": ", in line"}.get(v.get("surprise"), "")
+            lines.append(f"- {ev['date']} {ev['time']} ET [{ev['tier']}] {ev['event']}: actual {v['actual']} "
+                         f"vs consensus {v.get('consensus')}, prev {v.get('previous')}{s}")
+    if not lines:
+        return ""
+    return (f"## Recent US macro releases (last {days} days, newest first)\n" + "\n".join(lines[:15])
+            + "\n(Consider how these surprises shaped rates, sector rotation and this stock's recent moves.)")
 
 
 # ---------------------------------------------------------------- company logos
