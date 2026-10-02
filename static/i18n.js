@@ -39,7 +39,11 @@ const I18N = {
     // ---- home
     "Markets": "市場", "← Markets": "← 市場", "Market Calendar": "市場行事曆",
     "US releases & earnings · next 7 days · times ET": "美國經濟數據與財報 · 未來 7 天 · 美東時間",
-    "Critical": "關鍵", "Major + critical": "重要＋關鍵", "Economy": "經濟", "Earnings": "財報",
+    "Critical": "關鍵", "Major + critical": "重要＋關鍵", "Economy": "經濟", "Earnings": "財報", "Recent": "近期",
+    "Released US data · last 7 days · times ET": "已公布美國經濟數據 · 過去 7 天 · 美東時間",
+    "Above consensus": "高於預期", "Below consensus": "低於預期", "In line": "符合預期",
+    "No critical US releases in the last 7 days.": "過去 7 天沒有關鍵的美國經濟數據。",
+    "No major US releases in the last 7 days.": "過去 7 天沒有重要的美國經濟數據。",
     "Top Stories": "頭條新聞", "All": "全部", "S&P 500": "標普 500", "Nasdaq": "那斯達克", "Dow": "道瓊", "Russell": "羅素",
     "Nasdaq 100": "那斯達克 100", "Dow Jones": "道瓊工業", "Russell 2000": "羅素 2000", "Volatility": "波動率指數",
     "Movers": "熱門異動", "Gainers": "漲幅榜", "Losers": "跌幅榜", "Active": "成交熱門", "No data.": "無資料。",

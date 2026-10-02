@@ -735,8 +735,8 @@ async function loadCalendar() {
   }
 }
 
-function econRows() {
-  const evs = state.cal?.economic || [];
+function econRows(key = "economic") {
+  const evs = state.cal?.[key] || [];
   return state.calFilter === "critical" ? evs.filter((e) => e.tier === "critical") : evs;
 }
 
@@ -756,20 +756,38 @@ function renderCalendarNext() {
 function renderCalendar() {
   const cal = state.cal;
   if (!cal) return;
-  const econ = econRows(), earn = cal.earnings || [];
+  const econ = econRows(), recent = econRows("recent"), earn = cal.earnings || [];
+  const tabs = { recent: ["Recent", recent], economy: ["Economy", econ], earnings: ["Earnings", earn] };
   $$("#cal-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.tab === state.calTab);
-    const n = b.dataset.tab === "economy" ? econ.length : earn.length;
-    b.innerHTML = `${b.dataset.tab === "economy" ? "Economy" : "Earnings"}<span class="n">${n}</span>`;
+    const [label, rows] = tabs[b.dataset.tab];
+    b.innerHTML = `${label}<span class="n">${rows.length}</span>`;
   });
   $$("#cal-filter button").forEach((b) => b.classList.toggle("active", b.dataset.f === state.calFilter));
-  $("#cal-filter").hidden = state.calTab !== "economy";
+  $("#cal-filter").hidden = state.calTab === "earnings";
+  $("#cal-sub").textContent = t(state.calTab === "recent" ? "Released US data · last 7 days · times ET" : "US releases & earnings · next 7 days · times ET");
   renderCalendarNext();
 
   const byDay = (rows) => rows.reduce((m, r) => ((m[r.date] ||= []).push(r), m), {});
   const today = nyToday();
   let html = "";
-  if (state.calTab === "economy") {
+  if (state.calTab === "recent") {
+    const arrow = { above: ["▲", "Above consensus"], below: ["▼", "Below consensus"], inline: ["=", "In line"] };
+    for (const [date, rows] of Object.entries(byDay(recent))) {
+      html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${t(rows.length > 1 ? "{n} events" : "{n} event", { n: rows.length })}</span></div>`;
+      html += rows.map((e) => {
+        const vals = e.values || [];
+        const join = (k) => vals.map((v) => v[k]).filter(Boolean).join(" · ");
+        const sp = arrow[vals[0]?.surprise];
+        return `<div class="cal-row" data-desc="${esc(e.description || "")}">
+          <span class="tm">${fmtEtTime(e.time)}</span>
+          <span class="ev"><span class="tier ${e.tier}">${e.tier === "critical" ? "CRITICAL" : "MAJOR"}</span><b title="${esc(e.event)}">${esc(e.event)}</b></span>
+          <span class="cal-vals"><span class="v act ${sp ? `sp-${vals[0].surprise}` : ""}" ${sp ? `title="${t(sp[1])}"` : ""}><small>Actual</small>${esc(join("actual") || "—")}${sp ? ` ${sp[0]}` : ""}</span><span class="v"><small>Cons.</small>${esc(join("consensus") || "—")}</span><span class="v"><small>Prev.</small>${esc(join("previous") || "—")}</span></span>
+        </div>`;
+      }).join("");
+    }
+    if (!recent.length) html = `<div class="cal-empty">${t(state.calFilter === "critical" ? "No critical US releases in the last 7 days." : "No major US releases in the last 7 days.")}</div>`;
+  } else if (state.calTab === "economy") {
     const days = byDay(econ);
     for (const [date, rows] of Object.entries(days)) {
       html += `<div class="cal-day ${date === today ? "today" : ""}"><span>${dayLabel(date)}</span><span>${t(rows.length > 1 ? "{n} events" : "{n} event", { n: rows.length })}</span></div>`;
