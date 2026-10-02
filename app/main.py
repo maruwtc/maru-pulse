@@ -50,7 +50,11 @@ STREAM_LIFETIME = 60  # seconds per SSE connection
 MODELS = [
     {"id": "deepseek/deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash", "price": "$0.02 / $0.60"},
     {"id": "z-ai/glm-5.3-flash", "label": "GLM 5.3 Flash", "price": "$0.02 / $0.30"},
-    {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "price": "$0.10 / $0.50"}
+    {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "price": "$0.10 / $0.50"},
+    # Free tier: no token cost, but OpenRouter rate-limits free models and their providers may log prompts.
+    {"id": "qwen/qwen3.8-27b:free", "label": "Qwen 3.8-27b (free)", "price": "free"},
+    {"id": "nvidia/nemotron-3-ultra-550b-a55b:free", "label": "Nemotron 3 Ultra (free)", "price": "free"},
+    {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26b A4B IT (free)", "price": "free"}
 ]
 
 MARKET_NEWS_SYMBOLS = "SPY,QQQ,DIA,IWM"
@@ -508,10 +512,17 @@ async def stream(request: Request, symbol: str, interval: float = 5):
 # ---------------------------------------------------------------- AI analysis
 
 
+class ChatTurn(BaseModel):
+    role: str  # user | assistant
+    content: str
+
+
 class AnalyzeRequest(BaseModel):
     symbol: str
     model: str | None = None
     question: str | None = None
+    history: list[ChatTurn] | None = None  # follow-ups: earlier turns, starting with the analysis itself
+    first_question: str | None = None      # the question asked with the original analysis, if any
     lang: str | None = None  # UI language, e.g. "zh-Hant"
 
 
@@ -602,15 +613,25 @@ factors the data supports and what you cannot verify (e.g. guidance or call comm
 Then continue with the remaining sections, kept shorter. Write the whole response in the same language as the user's
 question (e.g. Traditional Chinese if they wrote in Traditional Chinese), keeping tickers and numbers as-is."""
 
+FOLLOWUP_PROMPT = """You are a sharp, balanced equity research analyst in an ongoing conversation about one stock.
+Earlier in the conversation you wrote a research note; the user now has a follow-up. Using ONLY the data provided
+(refreshed just now) and the conversation so far, answer the user's latest message directly and specifically, with
+numbers where they help. Use Markdown. Keep it focused — usually under 250 words — and do not repeat the full report
+or its section template. Say clearly when the data can't answer something. Write in the same language as the user's
+latest message unless told otherwise. Not investment advice."""
+
 # The app's UI language (request field `lang`). English needs no note.
 LANG_NAMES = {"zh-Hant": "Traditional Chinese (繁體中文, as used in Taiwan and Hong Kong)"}
 
 
-def lang_note(lang: str | None, json_mode: bool = False) -> str:
+def lang_note(lang: str | None, json_mode: bool = False, report: bool = True) -> str:
     """Prompt suffix asking for output in the user's app language; overrides other language instructions."""
     name = LANG_NAMES.get(lang or "")
     if not name:
         return ""
+    if not report:  # free-form answers (follow-ups): no report headings to keep
+        return (f"\n\nLanguage (the user's app language; overrides any other language instruction): write the whole "
+                f"response in {name}. Keep tickers and numbers as-is.")
     if json_mode:
         return (f"\n\nLanguage (the user's app language; overrides any other language instruction): write every "
                 f"human-readable string value (summary, setup, rationale, outlook, management, risks, notes, reasons, "
@@ -631,7 +652,7 @@ async def openrouter_stream(api_key: str, messages: list[dict], model: str, **ex
     """Yield ("text", str) chunks then ("usage", dict) from an OpenRouter streaming completion."""
     body = {"model": model, "stream": True, "usage": {"include": True}, "messages": messages, **extra}
     headers = {"Authorization": f"Bearer {api_key}", "X-Title": "Maru Pulse",
-               "HTTP-Referer": "http://localhost:8000"}
+               "HTTP-Referer": "https://localhost:8000"}
     async with httpx.AsyncClient(timeout=180) as client:
         async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", json=body, headers=headers) as r:
             if r.status_code in (401, 403):
@@ -778,13 +799,147 @@ async def analyze(req: AnalyzeRequest, request: Request):
     model = req.model or DEFAULT_MODEL
     context = await run_in_threadpool(build_context, symbol)
     question = (req.question or "").strip()[:1000]
-    system = SYSTEM_PROMPT + ("\n\n" + QUESTION_PROMPT if question else "") + lang_note(req.lang)
-    ask = f"\n\n## User's question\n{question}" if question else ""
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"Analyze {symbol}. Today is {datetime.now(NY):%Y-%m-%d %H:%M} ET.\n\n{context}{ask}"},
-    ]
-    audit = AiAudit("analysis", symbol, user_id, model, req.lang, {"question": question or None})
+    # Follow-ups: the last few turns, alternating assistant / user, each capped so the prompt stays bounded.
+    history = [{"role": h.role, "content": h.content[:12000]} for h in (req.history or [])
+               if h.role in ("user", "assistant") and h.content.strip()][-12:]
+    followup = bool(history and question)
+    head = f"Analyze {symbol}. Today is {datetime.now(NY):%Y-%m-%d %H:%M} ET.\n\n{context}"
+    if followup:
+        first_q = (req.first_question or "").strip()[:1000]
+        messages = [{"role": "system", "content": FOLLOWUP_PROMPT + lang_note(req.lang, report=False)},
+                    {"role": "user", "content": head + (f"\n\n## User's question\n{first_q}" if first_q else "")},
+                    *history,
+                    {"role": "user", "content": question}]
+    else:
+        system = SYSTEM_PROMPT + ("\n\n" + QUESTION_PROMPT if question else "") + lang_note(req.lang)
+        ask = f"\n\n## User's question\n{question}" if question else ""
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": head + ask}]
+    audit = AiAudit("analysis", symbol, user_id, model, req.lang,
+                    {"question": question or None, **({"followup": True, "turns": len(history)} if followup else {})})
+    audit.row["messages"] = messages
+
+    async def gen():
+        text = ""
+        try:
+            async for kind, value in openrouter_stream(api_key, messages, model):
+                if kind == "usage":
+                    audit.row["usage"] = value
+                    yield sse("usage", value)
+                elif kind == "text":
+                    text += value
+                    yield sse(None, {"text": value})
+            audit.row["status"] = "ok"
+        except (OpenRouterError, httpx.HTTPError) as e:
+            audit.row.update(status="error", error=str(e))
+            yield sse("error", {"error": str(e)})
+            return
+        finally:
+            audit.row["output"] = text
+            audit.finish()
+        yield sse("done", {})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------- AI market brief (home page)
+class BriefRequest(BaseModel):
+    model: str | None = None
+    lang: str | None = None
+    watchlist: list[str] = []
+
+
+BRIEF_PROMPT = """You are a sharp markets editor writing today's US market brief for an active trader. Using ONLY the data
+provided, write a tight Markdown brief with these sections (skip a section if there's nothing meaningful for it):
+### Headline  (1-2 sentences: the single most important story of the day and how the market is reacting)
+### Indexes  (S&P 500, Nasdaq 100, Dow, Russell 2000 and VIX moves; risk-on / risk-off read; note pre-market / after-hours moves when in session)
+### Movers  (the notable gainers, losers and most-active names, and why if the headlines explain it)
+### Macro & Calendar  (today's releases with actual vs consensus and what they imply; the next critical release and when, in ET)
+### Earnings  (today's / tomorrow's notable reports and timing)
+### Your Watchlist  (only if watchlist data is provided: the biggest movers and anything in the news about them)
+### What to Watch  (2-4 bullets for the rest of the session / next day)
+Use bullet points and specific numbers. Don't invent data, prices or reasons that aren't in the data — say when something
+is unknown. Keep it under ~350 words. End with a one-line reminder that this is not investment advice."""
+
+
+def session_label(now: datetime) -> str:
+    mins = now.hour * 60 + now.minute
+    if now.weekday() >= 5:
+        return "weekend — markets closed (data is from the last session)"
+    if 570 <= mins < 960:
+        return "regular session open"
+    if 240 <= mins < 570:
+        return "pre-market (regular session opens 9:30 ET)"
+    if 960 <= mins < 1200:
+        return "after-hours (regular session closed at 16:00 ET)"
+    return "markets closed"
+
+
+def build_brief_context(watchlist: list[str]) -> str:
+    now = datetime.now(NY)
+    today = now.date().isoformat()
+    parts = [f"Now: {now:%A %Y-%m-%d %H:%M} ET — {session_label(now)}."]
+    try:
+        parts.append("## Indexes (ETF proxies + VIX)\n" + "\n".join(
+            f"- {q['symbol']} ({q.get('name')}): {q['price']:.2f} ({q['change_percent']:+.2f}%)"
+            + (f"; {q['ext']['label']} {q['ext']['price']} ({q['ext']['change_percent']:+.2f}%)" if q.get("ext") else "")
+            for q in indices() if q.get("price") is not None))
+    except Exception:
+        pass
+    try:
+        mv = movers()
+        parts.append("## Movers\n" + "\n".join(
+            f"{kind.title()}: " + "; ".join(f"{m['symbol']} ({m.get('name')}) {m['percent_change']:+.1f}% @ {m.get('price')}"
+                                           for m in mv.get(kind, [])[:6])
+            for kind in ("gainers", "losers", "active")))
+    except Exception:
+        pass
+    try:
+        econ = economic_calendar(7)
+        todays = [e for e in econ if e["date"] == today]
+        upcoming = [e for e in econ if e["date"] > today and e["tier"] == "critical"][:5]
+        fmt_e = lambda e: f"- {e['date']} {e['time']} ET [{e['tier']}] {e['event']}: " + "; ".join(
+            ", ".join(f"{k} {v}" for k, v in vals.items() if v) for vals in e["values"]) if e["values"] else f"- {e['date']} {e['time']} ET [{e['tier']}] {e['event']}"
+        parts.append("## Economic calendar — today\n" + ("\n".join(fmt_e(e) for e in todays) or "No major US releases today."))
+        if upcoming:
+            parts.append("## Next critical releases\n" + "\n".join(fmt_e(e) for e in upcoming))
+    except Exception:
+        pass
+    try:
+        watch = set(watchlist)
+        tomorrow = (now.date() + timedelta(days=1)).isoformat()
+        earn = [e for e in earnings_calendar(3) if e["date"] in (today, tomorrow)
+                and ((e["market_cap"] or 0) >= EARNINGS_MAJOR_CAP or e["symbol"] in watch)][:15]
+        if earn:
+            parts.append("## Earnings (today / tomorrow)\n" + "\n".join(
+                f"- {e['date']} {e['symbol']} ({e.get('name')}), {e.get('time') or 'time n/a'}, EPS est {e.get('eps_consensus')}"
+                + (" [on user's watchlist]" if e["symbol"] in watch else "") for e in earn))
+    except Exception:
+        pass
+    if watchlist:
+        try:
+            qs = get_quotes(",".join(watchlist[:30]))
+            parts.append("## User's watchlist\n" + "\n".join(
+                f"- {q['symbol']} ({q.get('name')}): {q.get('last_price')} ({(q.get('change_percent') or 0):+.2f}%)" for q in qs))
+        except Exception:
+            pass
+    try:
+        news = market_news(20)
+        parts.append("## Market headlines\n" + "\n".join(
+            f"- [{(n.get('date') or '')[:16]}] {n['title']} ({n.get('source')}): {(n.get('summary') or '')[:220]}" for n in news))
+    except Exception:
+        pass
+    return "\n\n".join(parts)
+
+
+@app.post("/api/market-brief")
+async def market_brief(req: BriefRequest, request: Request):
+    api_key, user_id = await require_ai_key(request)
+    model = req.model or DEFAULT_MODEL
+    watchlist = [s.strip().upper() for s in req.watchlist if re.fullmatch(r"[A-Za-z0-9.^=-]{1,12}", s.strip())][:30]
+    context = await run_in_threadpool(build_brief_context, watchlist)
+    messages = [{"role": "system", "content": BRIEF_PROMPT + lang_note(req.lang, report=False)},
+                {"role": "user", "content": f"Write today's market brief.\n\n{context}"}]
+    audit = AiAudit("market_brief", "MARKET", user_id, model, req.lang, {"watchlist": watchlist})
     audit.row["messages"] = messages
 
     async def gen():
@@ -1533,17 +1688,20 @@ def get_events(symbol: str) -> dict:
         try:  # how the stock actually reacted: first regular-session close that could price in the report
             closes = {b["time"]: b["close"] for b in get_history(symbol, "1Y")["bars"] if b["close"]}
             days = sorted(closes)
+            chg = lambda a, b: round((closes[days[b]] / closes[days[a]] - 1) * 100, 2) if a >= 0 and b < len(days) else None
             for h in out["history"]:
                 before_open = h.pop("before_open")
+                h["timing"] = "before_open" if before_open else "after_close"
                 i = next((k for k, d in enumerate(days) if d >= h["date"]), None)
                 if i is None:
                     continue
+                if days[i] == h["date"]:
+                    h["day_pct"] = chg(i - 1, i)        # the report date's own session
+                    h["next_day_pct"] = chg(i, i + 1)   # the session after it
                 if days[i] != h["date"] or before_open:  # report before the open (or on a non-trading day): that day vs prior close
-                    a, b = (i - 1, i)
+                    h["reaction_pct"] = chg(i - 1, i)
                 else:  # after the close: next day vs report-day close
-                    a, b = (i, i + 1)
-                if a >= 0 and b < len(days):
-                    h["reaction_pct"] = round((closes[days[b]] / closes[days[a]] - 1) * 100, 2)
+                    h["reaction_pct"] = chg(i, i + 1)
         except Exception:
             for h in out["history"]:
                 h.pop("before_open", None)
