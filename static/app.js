@@ -693,6 +693,46 @@ async function loadStockNews(symbol, quiet = false) {
   }
 }
 
+/* ================================================================ AI market brief (home) */
+// Generated on demand (it runs on the user's own OpenRouter key) and kept for the rest of the New York day.
+const BRIEF_KEY = "mp.brief";
+const savedBrief = () => { const b = store.get(BRIEF_KEY, null); return b && b.date === nyToday() && b.lang === LANG ? b : null; };
+
+function renderBrief(liveText = null, liveMeta = null) {
+  const el = $("#brief-body"), streaming = liveText != null;
+  const b = streaming ? { text: liveText, ...liveMeta } : savedBrief();
+  if (!b) {
+    if (!$("#brief-btn").disabled) $("#brief-btn span").textContent = t("Generate brief");
+    el.innerHTML = state.aiEnabled
+      ? `<div class="ai-note muted">${t("Click {btn} for a summary of today's market — indexes, movers, economic data, earnings and headlines, plus your watchlist.", { btn: `<b>${t("Generate brief")}</b>` })}</div>`
+      : aiGateHTML("market brief");
+    return;
+  }
+  const asOf = b.at ? `${new Date(b.at).toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })} ET` : "";
+  el.innerHTML = `<div class="ai-meta">${asOf ? `<span class="chip static">${t("As of {time}", { time: asOf })}</span>` : ""}<span class="muted tiny">${esc(usageBits(b))}</span></div>
+    ${streaming && !b.text ? `<div class="ai-thinking"><div class="spinner"></div>${t("Reading today's market…")}</div>` : ""}
+    <div class="ai-output ${streaming ? "streaming" : ""}">${md(b.text)}</div>`;
+  if (!streaming) $("#brief-btn span").textContent = t("Refresh");
+}
+
+async function generateBrief() {
+  if (!state.aiEnabled) return promptAiSetup();
+  const btn = $("#brief-btn"), meta = { model: currentModel() };
+  btn.disabled = true;
+  $("#brief-btn span").textContent = t("Generating…");
+  renderBrief("", meta);
+  try {
+    const res = await streamText("/api/market-brief", { model: meta.model, watchlist: state.watchlist }, (tx) => renderBrief(tx, meta));
+    store.set(BRIEF_KEY, { date: nyToday(), lang: LANG, text: res.text, ...meta, ...res.usage, at: new Date().toISOString() });
+  } catch (e) {
+    toast(t("Market brief failed: {msg}", { msg: e.message }));
+  } finally {
+    btn.disabled = false;
+    renderBrief();
+  }
+}
+$("#brief-btn").addEventListener("click", generateBrief);
+
 /* ================================================================ market calendar */
 // Calendar times are naive New York times ("2026-10-01T08:30:00"); convert to a real instant.
 function etDate(iso) {
@@ -1228,32 +1268,60 @@ function stanceOf(text) {
   return m ? m[1] || { 看多: "bullish", 看空: "bearish", 中性: "neutral" }[m[0]] : null;
 }
 
+const usageBits = (m) => [m?.model, m?.completion_tokens ? `${m.prompt_tokens + m.completion_tokens} tokens` : null,
+  m?.cost != null ? `$${Number(m.cost).toFixed(5)}` : null, m?.at ? ago(m.at) : null].filter(Boolean).join(" · ");
+const md = (text) => DOMPurify.sanitize(marked.parse(text || ""));
+
+// The analysis, any follow-up Q&A under it, and the follow-up box. `ai` is the saved record:
+// { text, model, question, usage…, at, thread: [{ q, a, model, cost, at, … }] }.
 function showAnalysis(text, meta, streaming) {
   const stance = stanceOf(text);
   const stanceHTML = stance ? `<span class="stance ${{ bullish: "bull", bearish: "bear", neutral: "neutral" }[stance]}">${{ bullish: "▲", bearish: "▼", neutral: "◆" }[stance]} ${t(stance[0].toUpperCase() + stance.slice(1))}</span>` : "";
-  const bits = [meta?.model, meta?.completion_tokens ? `${meta.prompt_tokens + meta.completion_tokens} tokens` : null, meta?.cost != null ? `$${Number(meta.cost).toFixed(5)}` : null, meta?.at ? ago(meta.at) : null].filter(Boolean);
   $("#ai-body").innerHTML = `
-    <div class="ai-meta">${stanceHTML}<span class="muted tiny">${esc(bits.join(" · "))}</span><span class="sp"></span>${!streaming ? `<button class="btn" id="copy-ai" style="height:30px;padding:0 10px;font-size:12px">Copy</button>` : ""}</div>
+    <div class="ai-meta">${stanceHTML}<span class="muted tiny">${esc(usageBits(meta))}</span><span class="sp"></span>${!streaming ? `<button class="btn" id="copy-ai" style="height:30px;padding:0 10px;font-size:12px">Copy</button>` : ""}</div>
     ${meta?.question ? `<div class="ai-q"><b>Q</b>${esc(meta.question)}</div>` : ""}
     ${streaming && !text ? `<div class="ai-thinking"><div class="spinner"></div>Gathering OpenBB data and analyzing…</div>` : ""}
-    <div class="ai-output ${streaming ? "streaming" : ""}">${DOMPurify.sanitize(marked.parse(text || ""))}</div>`;
+    <div class="ai-output ${streaming ? "streaming" : ""}">${md(text)}</div>
+    <div id="ai-thread" class="ai-thread"></div>
+    ${!streaming && state.aiEnabled ? `<form class="ai-follow" id="ai-follow" autocomplete="off">
+      <textarea id="ai-followup" rows="1" maxlength="1000" placeholder="${esc(t("Ask a follow-up question…"))}"></textarea>
+      <button class="btn primary" type="submit" id="ai-follow-btn"><span>${t("Ask")}</span></button>
+    </form>` : ""}`;
   $("#copy-ai")?.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Analysis copied", false)));
   if (!streaming) $("#analyze-btn span").textContent = "Regenerate";
+  renderThread(meta?.thread || []);
+  const f = $("#ai-follow");
+  if (f) {
+    f.addEventListener("submit", (e) => { e.preventDefault(); askFollowUp(); });
+    $("#ai-followup").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); askFollowUp(); } // Shift+Enter for a new line
+    });
+  }
 }
 
-async function analyze() {
-  if (!state.aiEnabled) return promptAiSetup();
-  const symbol = state.symbol, btn = $("#analyze-btn"), model = currentModel();
-  const question = $("#ai-question").value.trim();
-  btn.disabled = true;
-  $("#analyze-btn span").textContent = question ? "Answering…" : "Analyzing…";
-  let text = "", meta = { model, ...(question ? { question } : {}) };
-  showAnalysis("", meta, true);
+function renderThread(thread, streaming = false) {
+  const el = $("#ai-thread");
+  if (!el) return;
+  el.innerHTML = thread.map((x, i) => {
+    const live = streaming && i === thread.length - 1;
+    return `<div class="ai-turn">
+      <div class="ai-q"><b>Q</b>${esc(x.q)}</div>
+      ${live && !x.a ? `<div class="ai-thinking"><div class="spinner"></div>${t("Thinking…")}</div>` : ""}
+      <div class="ai-output ${live ? "streaming" : ""}">${md(x.a)}</div>
+      ${!live && x.at ? `<div class="muted tiny ai-turn-meta">${esc(usageBits(x))}</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+// POST an AI request and stream the Markdown answer; calls onText(fullText) as it grows. Returns { text, usage }.
+// isCurrent() says whether the view that asked is still on screen (else the stream is abandoned).
+async function streamText(url, payload, onText, isCurrent = () => true) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ lang: LANG, ...payload }) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = "", text = "", usage = {}, pending = false, finished = false;
   try {
-    const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) }, body: JSON.stringify({ symbol, model, question: question || null, lang: LANG }) });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    const reader = r.body.getReader(), dec = new TextDecoder();
-    let buf = "", pending = false;
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -1264,17 +1332,38 @@ async function analyze() {
         buf = buf.slice(i + 2);
         const ev = (raw.match(/^event: (.*)$/m) || [])[1] || "message";
         const data = JSON.parse((raw.match(/^data: (.*)$/m) || [, "{}"])[1]);
-        if (symbol !== state.symbol) return;
+        if (!isCurrent()) throw new DOMException("moved on", "AbortError");
         if (ev === "error") throw new Error(data.error);
-        if (ev === "usage") meta = { ...meta, ...data };
+        if (ev === "usage") usage = data;
         else if (data.text) text += data.text;
       }
       if (!pending) {
         pending = true;
-        requestAnimationFrame(() => { pending = false; if (symbol === state.symbol) showAnalysis(text, meta, true); });
+        // A frame still queued when the stream ends must not repaint over the caller's final render.
+        requestAnimationFrame(() => { pending = false; if (!finished && isCurrent()) onText(text); });
       }
     }
-    meta.at = new Date().toISOString();
+  } finally {
+    finished = true;
+  }
+  return { text, usage };
+}
+
+const streamAnalyze = (symbol, body, onText) =>
+  streamText("/api/analyze", { symbol, ...body }, onText, () => symbol === state.symbol);
+
+async function analyze() {
+  if (!state.aiEnabled) return promptAiSetup();
+  const symbol = state.symbol, btn = $("#analyze-btn"), model = currentModel();
+  const question = $("#ai-question").value.trim();
+  btn.disabled = true;
+  $("#analyze-btn span").textContent = question ? "Answering…" : "Analyzing…";
+  let text = "", meta = { model, ...(question ? { question } : {}) }; // a new analysis starts a fresh thread
+  showAnalysis("", meta, true);
+  try {
+    const res = await streamAnalyze(symbol, { model, question: question || null }, (tx) => { text = tx; showAnalysis(tx, meta, true); });
+    text = res.text;
+    meta = { ...meta, ...res.usage, at: new Date().toISOString() };
     store.set(`mp.ai.${symbol}`, { text, ...meta });
     showAnalysis(text, meta, false);
   } catch (e) {
@@ -1283,6 +1372,39 @@ async function analyze() {
     toast(t("AI analysis failed: {msg}", { msg: e.message }));
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function askFollowUp() {
+  if (!state.aiEnabled) return promptAiSetup();
+  const symbol = state.symbol, input = $("#ai-followup"), q = input?.value.trim();
+  const ai = store.get(`mp.ai.${symbol}`, null);
+  if (!q || !ai?.text || $("#ai-follow-btn").disabled) return;
+  const thread = ai.thread || [];
+  // The conversation so far: the analysis, then each follow-up and its answer.
+  const history = [{ role: "assistant", content: ai.text }, ...thread.flatMap((x) => [{ role: "user", content: x.q }, { role: "assistant", content: x.a }])];
+  const model = currentModel(), turn = { q, a: "" };
+  const live = [...thread, turn];
+  input.value = "";
+  $("#ai-follow-btn").disabled = $("#analyze-btn").disabled = true;
+  $("#ai-follow-btn span").textContent = t("Thinking…");
+  renderThread(live, true);
+  try {
+    const res = await streamAnalyze(symbol, { model, question: q, history, first_question: ai.question || null },
+      (tx) => { turn.a = tx; renderThread(live, true); });
+    Object.assign(turn, { a: res.text, model, ...res.usage, at: new Date().toISOString() });
+    store.set(`mp.ai.${symbol}`, { ...ai, thread: live });
+  } catch (e) {
+    if (symbol !== state.symbol) return;
+    live.pop();
+    if (input.isConnected && !input.value) input.value = q; // give the question back so it can be retried
+    toast(t("AI analysis failed: {msg}", { msg: e.message }));
+  } finally {
+    if (symbol === state.symbol) {
+      renderThread(live);
+      $("#analyze-btn").disabled = false;
+      if ($("#ai-follow-btn")) { $("#ai-follow-btn").disabled = false; $("#ai-follow-btn span").textContent = t("Ask"); }
+    }
   }
 }
 $("#analyze-btn").addEventListener("click", analyze);
@@ -1528,13 +1650,21 @@ function renderEvents(ev) {
     </div>`);
   }
   if (ev.history.length) {
-    parts.push(`<div class="ev-sec">Earnings history <span class="ev-sec-r">EPS vs est · surprise · next day</span></div><div class="ev-hist">${ev.history.map((h) => {
+    // Day = the report date's session, Next = the session after. The one that first prices in the report
+    // (Day for before-open reports, Next for after-close) is the reaction and is shown bold.
+    const move = (v, react, tip) => `<span class="ev-react ${cls(v)}${react ? " is-react" : ""}" title="${t(tip)}${react ? ` · ${t("reaction to the report")}` : ""}">${v != null ? pct(v, 1) : "—"}</span>`;
+    parts.push(`<div class="ev-sec">Earnings history</div>
+      <div class="ev-row ev-head"><span></span><span>${t("EPS / est")}</span><span>${t("Surprise")}</span><span>${t("Day")}</span><span>${t("Next")}</span></div>
+      <div class="ev-hist">${ev.history.map((h) => {
       const beat = h.eps_estimate == null ? null : h.eps >= h.eps_estimate;
-      return `<div class="ev-row"><span class="muted">${shortDate(h.date)}</span>
-        <span class="mono">${fmt(h.eps)} <span class="muted">${t("vs")} ${fmt(h.eps_estimate)}</span></span>
+      const bmo = h.timing === "before_open";
+      const mdate = new Date(h.date + "T12:00:00").toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+      return `<div class="ev-row"><span class="muted" title="${shortDate(h.date)} · ${t(bmo ? "Before open" : "After close")}">${mdate} ${bmo ? "☀" : "☾"}</span>
+        <span class="mono" title="${t("Reported EPS / estimate")}">${fmt(h.eps)}<span class="muted">/${fmt(h.eps_estimate)}</span></span>
         ${beat == null ? "<span></span>" : `<span class="ev-tag ${beat ? "up" : "down"}" title="${t(beat ? "Beat the EPS estimate" : "Missed the EPS estimate")}">${h.surprise_pct != null ? pct(h.surprise_pct, 0) : beat ? "Beat" : "Miss"}</span>`}
-        <span class="ev-react ${cls(h.reaction_pct)}" title="Stock move on the first session after the report">${h.reaction_pct != null ? pct(h.reaction_pct, 1) : "—"}</span></div>`;
-    }).join("")}</div>`);
+        ${move(h.day_pct, bmo, "Stock move on the report date")}${move(h.next_day_pct, !bmo, "Stock move on the session after the report date")}</div>`;
+    }).join("")}</div>
+      <div class="muted tiny ev-note">${t("☾ after close · ☀ before open · bold = the session that reacted to the report")}</div>`);
   }
   const d = ev.dividends;
   if (d?.amount) {
@@ -2210,6 +2340,7 @@ async function authHeaders() {
 
 function refreshAiAvailability() {
   state.aiEnabled = !!(state.user && state.byok);
+  renderBrief();
   if (state.symbol) {
     if (!$("#analyze-btn").disabled) aiEmpty(state.symbol);
     if (!$("#trade-btn").disabled) { const t = getTrade(state.symbol, state.risk); t ? showTrade(t) : tradeEmpty(); }

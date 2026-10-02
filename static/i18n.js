@@ -175,7 +175,7 @@ const I18N = {
 
     // ---- AI analysis
     "AI Analysis": "AI 分析", "News, technicals & fundamentals synthesized by an LLM via OpenRouter": "透過 OpenRouter 由大型語言模型綜合新聞、技術面與基本面",
-    "Analyze": "分析", "Analyzing…": "分析中…", "Answering…": "回答中…", "Copy": "複製", "Analysis copied": "已複製分析",
+    "Analyze": "分析", "Ask a follow-up question…": "繼續追問…（Enter 送出，Shift+Enter 換行）", "Ask": "提問", "Thinking…": "思考中…", "Analyzing…": "分析中…", "Answering…": "回答中…", "Copy": "複製", "Analysis copied": "已複製分析",
     "Optional question — e.g. “Earnings beat big but the stock didn’t rise after hours — why?” or “財報開很好，但盤後沒有漲，為什麼？”":
       "選填問題——例如「財報開很好，但盤後沒有漲，為什麼？」",
     "Live quote": "即時報價", "Price, volume, moving averages, 52-week range": "價格、成交量、均線、52 週區間",
@@ -188,7 +188,12 @@ const I18N = {
     "AI {what} needs the server's Supabase settings (see README).": "AI {what}需要伺服器的 Supabase 設定（請見 README）。",
     "Sign in and add your own OpenRouter API key to use AI {what}.": "登入並加入你自己的 OpenRouter API 金鑰即可使用 AI {what}。",
     "Add your OpenRouter API key to use AI {what}.": "加入你的 OpenRouter API 金鑰即可使用 AI {what}。", "Add API key": "加入 API 金鑰",
-    "analysis": "分析", "trade ideas": "交易建議", "Add your OpenRouter API key to use AI features.": "請加入你的 OpenRouter API 金鑰以使用 AI 功能。",
+    "analysis": "分析", "trade ideas": "交易建議", "market brief": "市場摘要",
+    "AI Market Brief": "AI 市場摘要", "Today's highlights from indexes, movers, the calendar, earnings and headlines": "綜合指數、異動股、行事曆、財報與新聞的今日重點",
+    "Generate brief": "產生摘要", "Refresh": "重新整理", "As of {time}": "截至 {time}", "Reading today's market…": "正在讀取今日市場…",
+    "Click {btn} for a summary of today's market — indexes, movers, economic data, earnings and headlines, plus your watchlist.":
+      "點擊{btn}取得今日市場摘要——指數、異動股、經濟數據、財報與新聞，以及你的自選股。",
+    "Market brief failed: {msg}": "市場摘要失敗：{msg}", "Add your OpenRouter API key to use AI features.": "請加入你的 OpenRouter API 金鑰以使用 AI 功能。",
 
     // ---- key stats / about
     "Key Statistics": "關鍵數據", "Day range": "當日區間", "52-week range": "52 週區間",
@@ -205,7 +210,10 @@ const I18N = {
     // ---- events
     "Events": "事件", "Earnings · dividends · filings": "財報 · 股利 · 申報文件", "Next earnings": "下次財報",
     "After close": "收盤後", "Before open": "開盤前", "EPS est": "EPS 預估", "Rev est": "營收預估",
-    "Earnings history": "歷史財報", "EPS vs est · surprise · next day": "EPS vs 預估 · 驚喜 · 隔日", "vs": "vs",
+    "Earnings history": "歷史財報", "EPS vs est": "EPS vs 預估", "EPS / est": "EPS / 預估", "Reported EPS / estimate": "實際 EPS / 預估", "Surprise": "驚喜", "Day": "當日", "Next": "隔日",
+    "reaction to the report": "財報反應", "Stock move on the report date": "財報公布當日的股價變動",
+    "Stock move on the session after the report date": "財報公布隔日的股價變動",
+    "☾ after close · ☀ before open · bold = the session that reacted to the report": "☾ 收盤後公布 · ☀ 開盤前公布 · 粗體＝反應財報的交易時段", "EPS vs est · surprise · next day": "EPS vs 預估 · 驚喜 · 隔日", "vs": "vs",
     "Beat the EPS estimate": "優於 EPS 預估", "Missed the EPS estimate": "低於 EPS 預估", "Beat": "優於", "Miss": "低於",
     "Stock move on the first session after the report": "財報公布後第一個交易時段的股價變動",
     "Dividend": "股利", "annual": "年配", "semi-annual": "半年配", "quarterly": "季配", "monthly": "月配", "Raised": "已調升",
