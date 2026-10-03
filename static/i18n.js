@@ -193,6 +193,18 @@ const I18N = {
     "Generate brief": "產生摘要", "Refresh": "重新整理", "As of {time}": "截至 {time}", "Reading today's market…": "正在讀取今日市場…",
     "Click {btn} for a summary of today's market — indexes, movers, economic data, earnings and headlines, plus your watchlist.":
       "點擊{btn}取得今日市場摘要——指數、異動股、經濟數據、財報與新聞，以及你的自選股。",
+    "chat": "聊天助理", "Ask Maru AI": "詢問 Maru AI", "Ask about markets, sectors & stocks": "問我市場、板塊與個股",
+    "New chat": "新對話", "Maximize": "放大", "Restore": "還原", "Close": "關閉", "Send": "傳送",
+    "Ask anything — e.g. what's your view on the electricity sector?": "問任何問題——例如：電力板塊有甚麼建議？",
+    "Uses live market data · educational only, not investment advice": "使用即時市場數據 · 僅供學習參考，並非投資建議",
+    "Hi, I'm Maru AI": "你好，我是 Maru AI",
+    "Ask me about any sector, stock or the market. I pull live quotes, sector performance, headlines and the economic calendar before answering.":
+      "可以問我任何板塊、個股或大市。回答前我會讀取即時報價、板塊表現、新聞與經濟日曆。",
+    "What's your suggestion on the electricity / utilities sector?": "電力／公用事業板塊有甚麼建議？",
+    "Which sectors are leading and lagging this month?": "本月哪些板塊領漲、哪些落後？",
+    "Compare NVDA and AMD right now": "比較 NVDA 和 AMD 目前的狀況",
+    "What macro events matter for stocks this week?": "本週有哪些重要的總經事件？",
+    "Checking live market data…": "正在查看即時市場數據…", "Chat failed: {msg}": "聊天失敗：{msg}",
     "Market brief failed: {msg}": "市場摘要失敗：{msg}", "Add your OpenRouter API key to use AI features.": "請加入你的 OpenRouter API 金鑰以使用 AI 功能。",
 
     // ---- key stats / about

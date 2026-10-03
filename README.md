@@ -40,6 +40,11 @@ A FastAPI + vanilla-JS webapp built on the [OpenBB Platform](https://github.com/
   **AI position review** (optionally with your own question) returns a verdict and health score, an action per position
   (hold / take profit / trim / cut / roll / hedge), stop / take-profit / watch levels (drawn on the chart), risk flags,
   and adjustment trades priced on the real chain.
+- **Maru AI chat** — a floating assistant (bottom-right button; can be maximized) for free-form questions such as
+  "what's your suggestion on the electricity sector?" or "compare NVDA and AMD". The server spots the sectors (English or
+  Chinese keywords) and tickers asked about and gives the model fresh data: all SPDR sector ETFs' 1W / 1M / 3M / YTD returns,
+  the sector's bellwethers (price vs 50/200-day averages, distance from the 52-week high, returns), quotes for named
+  tickers, headlines and the macro calendar. Conversation history is kept in the browser.
 - **Deep think** toggle: reasoning models are run in fast mode by default (~15-30 s); enable it for a slower,
   more thorough answer.
 - **AI analysis** via OpenRouter, streamed. Default model `deepseek/deepseek-v4-flash` ($0.14/$0.28 per 1M tokens);
@@ -90,6 +95,7 @@ Open http://localhost:8000
 | `GET /api/chain-meta/{symbol}` | Expirations, strikes, mids |
 | `POST /api/positions/evaluate` | Mark positions to market (P/L, greeks, payoff) |
 | `POST /api/positions/review` `{symbol, positions, question, model, deep}` | AI position review (SSE) |
+| `POST /api/chat` `{message, history, symbol, watchlist, model, deep}` | AI chat assistant with live sector / ticker data (SSE) |
 | `POST /api/byok/refresh` | Drop the server's cached copy of the caller's key |
 
 AI endpoints require `Authorization: Bearer <Supabase access token>` from a user who has saved an OpenRouter key.
