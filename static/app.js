@@ -733,6 +733,132 @@ async function generateBrief() {
 }
 $("#brief-btn").addEventListener("click", generateBrief);
 
+/* ================================================================ AI chat assistant (floating) */
+// Free-form Q&A ("what's your view on the electricity sector?"). The server detects the sectors / tickers asked about
+// and feeds the model fresh quotes, sector returns, headlines and the macro calendar. Kept in this browser only.
+const CHAT_KEY = "mp.chat";
+const chat = { msgs: store.get(CHAT_KEY, []), busy: false, live: null };
+const CHAT_SUGGESTIONS = [
+  "What's your suggestion on the electricity / utilities sector?",
+  "Which sectors are leading and lagging this month?",
+  "Compare NVDA and AMD right now",
+  "What macro events matter for stocks this week?",
+];
+// $NEE → link to the stock page.
+const chatMd = (text) => md(text).replace(/(^|[\s(>])\$([A-Z]{1,5}(?:[.-][A-Z])?)\b/g,
+  (m, pre, sym) => `${pre}<a class="tk" href="#/${sym}">$${sym}</a>`);
+
+function renderChat() {
+  const log = $("#chat-log");
+  if (!log || $("#chat-panel").hidden) return;
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  const msgs = chat.live ? [...chat.msgs, chat.live] : chat.msgs;
+  if (!msgs.length) {
+    log.innerHTML = state.aiEnabled
+      ? `<div class="chat-welcome"><h3>${t("Hi, I'm Maru AI")}</h3>
+          <div class="muted">${t("Ask me about any sector, stock or the market. I pull live quotes, sector performance, headlines and the economic calendar before answering.")}</div>
+          <div class="chat-sugs">${CHAT_SUGGESTIONS.map((q) => `<button type="button">${esc(t(q))}</button>`).join("")}</div></div>`
+      : aiGateHTML("chat");
+    $$(".chat-sugs button", log).forEach((b) => b.addEventListener("click", () => sendChat(b.textContent)));
+    return;
+  }
+  log.innerHTML = msgs.map((m) => {
+    if (m.role === "user") return `<div class="chat-msg user">${esc(m.content)}</div>`;
+    if (m.error) return `<div class="chat-msg err">${esc(m.error)}</div>`;
+    const live = m === chat.live;
+    const ctx = [...(m.ctx?.sectors || []), ...(m.ctx?.tickers || [])];
+    return `<div class="chat-msg bot">
+      ${ctx.length ? `<div class="chat-ctx">${ctx.map((c) => `<span>${esc(c)}</span>`).join("")}</div>` : ""}
+      ${live && !m.content ? `<div class="ai-thinking"><div class="spinner"></div>${t("Checking live market data…")}</div>` : ""}
+      <div class="ai-output ${live ? "streaming" : ""}">${chatMd(m.content)}</div>
+      ${!live && m.at ? `<div class="chat-meta muted">${esc(usageBits(m))}</div>` : ""}
+    </div>`;
+  }).join("");
+  if (stick || chat.live) log.scrollTop = log.scrollHeight;
+}
+
+async function sendChat(text) {
+  text = (text ?? $("#chat-input").value).trim();
+  if (!text || chat.busy) return;
+  if (!state.aiEnabled) return promptAiSetup();
+  const history = chat.msgs.filter((m) => !m.error).slice(-12).map((m) => ({ role: m.role, content: m.content }));
+  chat.msgs.push({ role: "user", content: text });
+  chat.busy = true;
+  chat.live = { role: "assistant", content: "", model: currentModel() };
+  $("#chat-input").value = "";
+  autosizeChat();
+  $("#chat-send").disabled = true;
+  renderChat();
+  try {
+    const res = await streamText("/api/chat", { message: text, history, symbol: state.symbol, watchlist: state.watchlist,
+      model: chat.live.model, deep: store.get("mp.deep", false) }, (tx) => { chat.live.content = tx; renderChat(); });
+    chat.msgs.push({ ...chat.live, content: res.text, ctx: res.context, ...res.usage, at: new Date().toISOString() });
+  } catch (e) {
+    chat.msgs.push({ role: "assistant", content: "", error: t("Chat failed: {msg}", { msg: e.message }) });
+  } finally {
+    chat.busy = false;
+    chat.live = null;
+    $("#chat-send").disabled = false;
+    store.set(CHAT_KEY, chat.msgs.slice(-40));
+    renderChat();
+    $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+  }
+}
+
+function autosizeChat() {
+  const el = $("#chat-input");
+  el.style.height = "auto";
+  el.style.height = `${Math.min(el.scrollHeight + 2, 160)}px`;
+}
+// Maximized = the panel moves into the main content area (beside the watchlist) in place of the current page;
+// otherwise it floats bottom-right. The choice is remembered for the next time the chat opens.
+const chatDocked = () => $("#chat-panel").classList.contains("max");
+function dockChat(max) {
+  const panel = $("#chat-panel"), log = $("#chat-log"), top = log.scrollTop;
+  if (max !== chatDocked()) (max ? $("#chat-view") : document.body).append(panel);
+  panel.classList.toggle("max", max);
+  $("#chat-view").hidden = !max;
+  document.body.classList.toggle("chat-docked", max);
+  $("#chat-max").title = $("#chat-max").ariaLabel = t(max ? "Restore" : "Maximize");
+  log.scrollTop = top; // moving the node resets its scroll position
+  if (max) window.scrollTo(0, 0);
+}
+function setChatOpen(open) {
+  $("#chat-panel").hidden = !open;
+  document.body.classList.toggle("chat-open", open);
+  dockChat(open && store.get("mp.chatMax", false));
+  if (!open) return;
+  renderChat();
+  $("#chat-log").scrollTop = $("#chat-log").scrollHeight;
+  $("#chat-input").focus();
+}
+function setChatMax(max) {
+  store.set("mp.chatMax", max);
+  dockChat(max);
+  $("#chat-input").focus();
+}
+$("#chat-fab").addEventListener("click", () => setChatOpen(true));
+$("#chat-close").addEventListener("click", () => setChatOpen(false));
+$("#chat-max").addEventListener("click", () => setChatMax(!chatDocked()));
+// Navigating (a $TICKER link in the chat, the watchlist, search) while maximized shows that page, with the chat floating.
+window.addEventListener("hashchange", () => { if (chatDocked()) dockChat(false); });
+$("#chat-new").addEventListener("click", () => {
+  if (chat.busy) return;
+  chat.msgs = [];
+  store.set(CHAT_KEY, []);
+  renderChat();
+  $("#chat-input").focus();
+});
+$("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
+$("#chat-input").addEventListener("input", autosizeChat);
+$("#chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); } // Shift+Enter for a new line
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("#chat-panel").hidden || document.querySelector(".modal:not([hidden]), .palette:not([hidden])")) return;
+  chatDocked() ? setChatMax(false) : setChatOpen(false);
+});
+
 /* ================================================================ market calendar */
 // Calendar times are naive New York times ("2026-10-01T08:30:00"); convert to a real instant.
 function etDate(iso) {
@@ -1313,14 +1439,14 @@ function renderThread(thread, streaming = false) {
   }).join("");
 }
 
-// POST an AI request and stream the Markdown answer; calls onText(fullText) as it grows. Returns { text, usage }.
+// POST an AI request and stream the Markdown answer; calls onText(fullText) as it grows. Returns { text, usage, context }.
 // isCurrent() says whether the view that asked is still on screen (else the stream is abandoned).
 async function streamText(url, payload, onText, isCurrent = () => true) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ lang: LANG, ...payload }) });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   const reader = r.body.getReader(), dec = new TextDecoder();
-  let buf = "", text = "", usage = {}, pending = false, finished = false;
+  let buf = "", text = "", usage = {}, context = null, pending = false, finished = false;
   try {
     for (;;) {
       const { value, done } = await reader.read();
@@ -1335,6 +1461,7 @@ async function streamText(url, payload, onText, isCurrent = () => true) {
         if (!isCurrent()) throw new DOMException("moved on", "AbortError");
         if (ev === "error") throw new Error(data.error);
         if (ev === "usage") usage = data;
+        else if (ev === "context") context = data;
         else if (data.text) text += data.text;
       }
       if (!pending) {
@@ -1346,7 +1473,7 @@ async function streamText(url, payload, onText, isCurrent = () => true) {
   } finally {
     finished = true;
   }
-  return { text, usage };
+  return { text, usage, context };
 }
 
 const streamAnalyze = (symbol, body, onText) =>
@@ -2341,6 +2468,7 @@ async function authHeaders() {
 function refreshAiAvailability() {
   state.aiEnabled = !!(state.user && state.byok);
   renderBrief();
+  renderChat();
   if (state.symbol) {
     if (!$("#analyze-btn").disabled) aiEmpty(state.symbol);
     if (!$("#trade-btn").disabled) { const t = getTrade(state.symbol, state.risk); t ? showTrade(t) : tradeEmpty(); }

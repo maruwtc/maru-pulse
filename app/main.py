@@ -965,6 +965,253 @@ async def market_brief(req: BriefRequest, request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+# ---------------------------------------------------------------- AI chat assistant (floating widget)
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatTurn] = []
+    symbol: str | None = None  # the stock page the user is on, if any
+    watchlist: list[str] = []
+    model: str | None = None
+    deep: bool = False
+    lang: str | None = None
+
+
+# Sector ETF (SPDR) + bellwethers, and the words (English / Chinese) that name each sector in a question.
+SECTORS = {
+    "Utilities / Electricity": {
+        "etf": "XLU", "names": "NEE,SO,DUK,CEG,VST,AEP,SRE,D,EXC,NRG,PCG,XEL",
+        "words": ["utilit", "electricity", "electric power", "electric util", "power", "grid", "nuclear", "energy storage", "公用", "電力", "电力", "電網",
+                  "电网", "核電", "核电", "發電", "发电", "用電", "用电", "電廠", "电厂"]},
+    "Energy (oil & gas)": {
+        "etf": "XLE", "names": "XOM,CVX,COP,EOG,SLB,PSX,MPC,OXY,WMB,KMI",
+        "words": ["energy", "oil", "gas", "crude", "petrol", "能源", "石油", "原油", "天然氣", "天然气"]},
+    "Clean energy / Solar": {
+        "etf": "ICLN", "names": "FSLR,ENPH,NEE,BEP,RUN,SEDG,PLUG",
+        "words": ["clean energy", "renewable", "solar", "wind", "green energy", "再生", "可再生", "太陽能", "太阳能", "風電", "风电", "綠能", "绿能"]},
+    "Technology": {
+        "etf": "XLK", "names": "AAPL,MSFT,NVDA,AVGO,ORCL,CRM,AMD,ADBE,CSCO,ACN",
+        "words": ["tech", "software", "科技", "軟件", "软件", "軟體"]},
+    "Semiconductors": {
+        "etf": "SMH", "names": "NVDA,TSM,AVGO,AMD,ASML,QCOM,MU,INTC,AMAT,LRCX",
+        "words": ["semi", "chip", "半導體", "半导体", "晶片", "芯片"]},
+    "AI": {
+        "etf": "BOTZ", "names": "NVDA,MSFT,GOOGL,META,AMZN,AVGO,AMD,PLTR,ORCL,TSM",
+        "words": ["a.i.", "artificial intelligence", "人工智能", "人工智慧"]},
+    "Financials": {
+        "etf": "XLF", "names": "JPM,BAC,WFC,GS,MS,C,BRK-B,V,MA,SCHW",
+        "words": ["financ", "bank", "金融", "銀行", "银行", "券商"]},
+    "Health care": {
+        "etf": "XLV", "names": "LLY,UNH,JNJ,ABBV,MRK,PFE,TMO,ABT,AMGN,ISRG",
+        "words": ["health", "pharma", "biotech", "medical", "drug", "醫療", "医疗", "藥", "药", "生物科技"]},
+    "Consumer discretionary": {
+        "etf": "XLY", "names": "AMZN,TSLA,HD,MCD,NKE,LOW,SBUX,BKNG,TJX,CMG",
+        "words": ["consumer discretionary", "retail", "discretionary", "非必需", "零售"]},
+    "Consumer staples": {
+        "etf": "XLP", "names": "PG,COST,WMT,KO,PEP,PM,MO,MDLZ,CL,KMB",
+        "words": ["staples", "consumer staples", "defensive", "必需", "防守"]},
+    "Industrials": {
+        "etf": "XLI", "names": "GE,CAT,RTX,UNP,HON,BA,DE,LMT,UPS,ETN",
+        "words": ["industrial", "manufactur", "aerospace", "defense", "defence", "工業", "工业", "國防", "国防", "航空"]},
+    "Materials": {
+        "etf": "XLB", "names": "LIN,SHW,APD,FCX,NEM,ECL,NUE,DOW",
+        "words": ["material", "mining", "gold", "copper", "steel", "chemical", "原材料", "礦", "矿", "黃金", "黄金", "銅", "铜"]},
+    "Real estate": {
+        "etf": "XLRE", "names": "PLD,AMT,EQIX,WELL,SPG,O,PSA,CCI",
+        "words": ["real estate", "reit", "property", "房地產", "房地产", "地產", "地产"]},
+    "Communication services": {
+        "etf": "XLC", "names": "META,GOOGL,NFLX,DIS,TMUS,VZ,T,CMCSA",
+        "words": ["communication", "telecom", "media", "streaming", "通訊", "通讯", "電訊", "电讯", "媒體", "媒体"]},
+}
+SECTOR_ETFS = {v["etf"]: k for k, v in SECTORS.items() if v["etf"].startswith("X")}
+
+# All-caps words that look like tickers but aren't.
+NOT_TICKERS = {"I", "A", "AI", "US", "USA", "ETF", "CEO", "CFO", "IPO", "EPS", "PE", "GDP", "CPI", "PPI", "FOMC", "FED",
+               "OK", "IT", "DO", "THE", "AND", "OR", "VS", "TL", "DR", "TLDR", "ATH", "YTD", "EV", "RSI", "MACD", "ET",
+               "PCE", "ISM", "NFP", "Q1", "Q2", "Q3", "Q4", "HK", "UK", "EU", "AM", "PM", "API", "IV", "OTM", "ITM", "ATM"}
+
+CHAT_PROMPT = """You are Maru, the AI market assistant inside the Maru Pulse trading app. You chat with an active
+retail trader about US stocks, sectors, ETFs, options and the macro backdrop.
+
+For each message you get a "Live data" block fetched just now (sector ETF performance, quotes for relevant names,
+headlines, the economic calendar). Ground your answer in it:
+- Answer the question directly first, then support it with specific numbers from the data.
+- For "what's your suggestion / outlook on <sector>" questions: give the sector's recent trend vs the market, the
+  drivers in the headlines and macro data (e.g. rates, AI power demand for utilities), then 2-4 names worth watching
+  with why (momentum, valuation, distance from 52-week high, 50/200-day averages), a balanced bull / bear view,
+  and how one might approach it (e.g. the ETF for broad exposure vs single names, wait for a pullback, size small).
+- Be concise and conversational: usually under 250 words, Markdown bullets and short sections, no long report template.
+- Never invent prices, figures or news that aren't in the data or conversation; say what the data doesn't cover.
+- You can mention tickers like $NEE; the app turns them into links.
+- Write in the same language as the user's latest message.
+- Close any suggestion with a short reminder that this is educational, not personalized investment advice."""
+
+
+def _mentions(text: str) -> tuple[list[str], list[str]]:
+    """Sectors and tickers named in a message."""
+    low = f" {text.lower()} "
+    sectors = [k for k, v in SECTORS.items() if any(w in low for w in v["words"])
+               or (k == "AI" and re.search(r"(?<![a-z])ai(?![a-z])", low))]
+    # "Electricity" also triggers the clean-energy / energy matches via "energy"; keep the most specific first.
+    if "Utilities / Electricity" in sectors and not re.search(r"oil|gas|crude|石油|原油", low):
+        sectors = [s for s in sectors if s != "Energy (oil & gas)"]
+    tickers = re.findall(r"\$([A-Za-z]{1,5}(?:[.-][A-Za-z])?)\b", text)
+    tickers += [w for w in re.findall(r"(?<![A-Za-z$])([A-Z]{2,5})(?![A-Za-z])", text) if w not in NOT_TICKERS]
+    return sectors, list(dict.fromkeys(t.upper() for t in tickers))
+
+
+def _returns(symbols: list[str]) -> dict[str, dict]:
+    """1W / 1M / 3M / YTD returns from daily closes, one batch request."""
+    def load():
+        start = (datetime.now(NY) - timedelta(days=380)).date()
+        df = obb_call(obb.equity.price.historical, ",".join(symbols), start_date=start, provider=PROVIDER)
+        if "symbol" not in df:
+            df["symbol"] = symbols[0]
+        out = {}
+        year = datetime.now(NY).year
+        for sym, g in df.groupby("symbol"):
+            g = g.sort_values("date")
+            c = [x for x in g["close"] if x == x]
+            if len(c) < 2:
+                continue
+            r = lambda n: round((c[-1] / c[-n - 1] - 1) * 100, 2) if len(c) > n else None
+            ytd_base = [cl for d, cl in zip(g["date"], g["close"]) if pd.Timestamp(d).year < year]
+            out[sym] = {"1W": r(5), "1M": r(21), "3M": r(63), "1Y": r(len(c) - 1),
+                        "YTD": round((c[-1] / ytd_base[-1] - 1) * 100, 2) if ytd_base else None}
+        return out
+    return cached(f"returns:{','.join(sorted(symbols))}", 900, load)
+
+
+def _quote_line(q: dict) -> str:
+    def vs(ma):
+        return f"{(q['last_price'] / q[ma] - 1) * 100:+.1f}%" if q.get(ma) and q.get("last_price") else "n/a"
+    off_high = f"{(q['last_price'] / q['year_high'] - 1) * 100:+.1f}%" if q.get("year_high") and q.get("last_price") else "n/a"
+    price = round(q["last_price"], 2) if q.get("last_price") else None
+    return (f"- {q['symbol']} ({q.get('name')}): {price} ({(q.get('change_percent') or 0):+.2f}% today); "
+            f"vs 50d MA {vs('ma_50d')}, vs 200d MA {vs('ma_200d')}; from 52w high {off_high} "
+            f"(52w {q.get('year_low')}-{q.get('year_high')})")
+
+
+def build_chat_context(text: str, symbol: str | None, watchlist: list[str]) -> tuple[str, list[str], list[str]]:
+    now = datetime.now(NY)
+    sectors, tickers = _mentions(text)
+    parts = [f"Now: {now:%A %Y-%m-%d %H:%M} ET — {session_label(now)}."]
+
+    # Market + all sector ETFs: lets the model compare any sector to the rest.
+    etfs = ["SPY", "QQQ", *SECTOR_ETFS]
+    try:
+        qs = {q["symbol"]: q for q in get_quotes(",".join(etfs))}
+        rets = _returns(etfs)
+        parts.append("## Market & sector ETFs (today % | 1W / 1M / 3M / YTD returns)\n" + "\n".join(
+            f"- {s} ({SECTOR_ETFS.get(s, 'market')}): {(qs.get(s, {}).get('change_percent') or 0):+.2f}% | "
+            + " / ".join(f"{k} {v:+.1f}%" if v is not None else f"{k} n/a" for k, v in rets.get(s, {}).items() if k != "1Y")
+            for s in etfs if s in qs or s in rets))
+    except Exception as e:
+        log.info("chat: sector snapshot failed: %s", e)
+
+    news_syms: list[str] = []
+    for name in sectors[:2]:
+        sec = SECTORS[name]
+        names = sec["names"].split(",")
+        try:
+            qs = get_quotes(",".join([sec["etf"], *names]))
+            rets = _returns([sec["etf"], *names])
+            lines = [_quote_line(q) + "; returns " + ", ".join(f"{k} {v:+.1f}%" for k, v in rets.get(q["symbol"], {}).items() if v is not None)
+                     for q in qs]
+            parts.append(f"## Sector: {name} — ETF {sec['etf']} and bellwethers\n" + "\n".join(lines))
+        except Exception as e:
+            log.info("chat: sector %s failed: %s", name, e)
+        news_syms += [sec["etf"], *names[:4]]
+
+    tickers = [t for t in tickers if t not in news_syms][:4]
+    if tickers:
+        try:
+            qs = get_quotes(",".join(tickers))
+            tickers = [q["symbol"] for q in qs]  # drop words that weren't real symbols
+            if qs:
+                parts.append("## Stocks mentioned\n" + "\n".join(_quote_line(q) for q in qs))
+        except Exception:
+            tickers = []
+        if len(tickers) == 1 and not sectors:  # one stock: the full research context
+            try:
+                parts.append(f"## Detail: {tickers[0]}\n" + build_context(tickers[0]))
+            except Exception:
+                pass
+        news_syms += tickers
+
+    if symbol and symbol not in tickers:
+        try:
+            parts.append(f"## Stock the user is viewing in the app\n{_quote_line(get_quote(symbol))}")
+        except Exception:
+            pass
+    if watchlist:
+        try:
+            parts.append("## User's watchlist\n" + "\n".join(
+                f"- {q['symbol']}: {q.get('last_price')} ({(q.get('change_percent') or 0):+.2f}%)" for q in get_quotes(",".join(watchlist[:20]))))
+        except Exception:
+            pass
+
+    try:
+        news = get_news(",".join(news_syms[:8]), 15) if news_syms else market_news(12)
+        parts.append("## Headlines\n" + "\n".join(
+            f"- [{(n.get('date') or '')[:10]}] {n['title']} ({n.get('source')}): {(n.get('summary') or '')[:200]}" for n in news))
+    except Exception:
+        pass
+    try:
+        if recap := macro_recap_context(7):
+            parts.append(recap)
+        upcoming = [e for e in economic_calendar(7) if e["tier"] == "critical"][:5]
+        if upcoming:
+            parts.append("## Upcoming critical US releases\n" + "\n".join(f"- {e['date']} {e['time']} ET {e['event']}" for e in upcoming))
+    except Exception:
+        pass
+    return "\n\n".join(parts), sectors, tickers
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest, request: Request):
+    api_key, user_id = await require_ai_key(request)
+    model = req.model or DEFAULT_MODEL
+    message = req.message.strip()[:2000]
+    if not message:
+        raise HTTPException(400, "Empty message.")
+    history = [{"role": h.role, "content": h.content[:8000]} for h in req.history
+               if h.role in ("user", "assistant") and h.content.strip()][-12:]
+    symbol = req.symbol.strip().upper() if req.symbol and re.fullmatch(r"[A-Za-z0-9.^=-]{1,12}", req.symbol.strip()) else None
+    watchlist = [s.strip().upper() for s in req.watchlist if re.fullmatch(r"[A-Za-z0-9.^=-]{1,12}", s.strip())][:20]
+    # Follow-ups ("which one is cheapest?") keep the topic of the recent user turns.
+    topic = " ".join([message, *[h["content"] for h in history if h["role"] == "user"][-2:]])
+    context, sectors, tickers = await run_in_threadpool(build_chat_context, topic, symbol, watchlist)
+    messages = [{"role": "system", "content": CHAT_PROMPT + lang_note(req.lang, report=False)},
+                *history,
+                {"role": "user", "content": f"{message}\n\n---\nLive data (fetched just now, for reference):\n\n{context}"}]
+    audit = AiAudit("chat", (tickers or [symbol or "CHAT"])[0], user_id, model, req.lang,
+                    {"message": message, "turns": len(history), "sectors": sectors, "tickers": tickers, "symbol": symbol})
+    audit.row["messages"] = messages
+
+    async def gen():
+        text = ""
+        yield sse("context", {"sectors": sectors, "tickers": tickers})
+        try:
+            async for kind, value in openrouter_stream(api_key, messages, model, **reasoning_opts(req.deep)):
+                if kind == "usage":
+                    audit.row["usage"] = value
+                    yield sse("usage", value)
+                elif kind == "text":
+                    text += value
+                    yield sse(None, {"text": value})
+            audit.row["status"] = "ok"
+        except (OpenRouterError, httpx.HTTPError) as e:
+            audit.row.update(status="error", error=str(e))
+            yield sse("error", {"error": str(e)})
+            return
+        finally:
+            audit.row["output"] = text
+            audit.finish()
+        yield sse("done", {})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
 # ---------------------------------------------------------------- signals & trade ideas
 
 
