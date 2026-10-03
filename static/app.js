@@ -1131,7 +1131,7 @@ let searchTimer, searchSel = 0, searchReq = 0, listFor = "";
 function openPalette() {
   palette.hidden = false;
   input.value = "";
-  renderOptions([], "");
+  renderSearchOptions([], "");
   setTimeout(() => input.focus(), 10);
 }
 const closePalette = () => (palette.hidden = true);
@@ -1144,7 +1144,7 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Escape" && !palette.hidden) closePalette();
 });
 
-function renderOptions(items, q) {
+function renderSearchOptions(items, q) {
   listFor = q;
   let groups;
   if (!q) {
@@ -1169,11 +1169,11 @@ function highlight() {
 input.addEventListener("input", () => {
   clearTimeout(searchTimer);
   const q = input.value.trim();
-  if (!q) return renderOptions([], "");
+  if (!q) return renderSearchOptions([], "");
   searchTimer = setTimeout(async () => {
     const req = ++searchReq;
     const items = await api(`/api/search?q=${encodeURIComponent(q)}`).catch(() => []);
-    if (req === searchReq && input.value.trim() === q) renderOptions(items, q);
+    if (req === searchReq && input.value.trim() === q) renderSearchOptions(items, q);
   }, 180);
 });
 input.addEventListener("keydown", (e) => {
@@ -1200,7 +1200,7 @@ async function submitSearch(q) {
   if (req !== searchReq || palette.hidden) return;
   const exact = items.find((i) => i.symbol === q.toUpperCase());
   const sym = exact?.symbol || items[0]?.symbol || (/^[A-Za-z.\-^]{1,6}$/.test(q) ? q.toUpperCase() : null);
-  if (!sym) return renderOptions(items, q);
+  if (!sym) return renderSearchOptions(items, q);
   closePalette();
   go(sym);
 }
