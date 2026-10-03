@@ -1,15 +1,15 @@
 /* ------------------------------------------------------------ tokens */
 :root {
-  --bg: #0a0d13;
-  --bg-2: #0e121a;
-  --panel: #121722;
-  --panel-2: #171d2a;
-  --hover: #1c2332;
-  --border: #212939;
-  --border-2: #2a3345;
-  --text: #e8ebf2;
-  --text-2: #b4bccb;
-  --muted: #7d8699;
+  --bg: #0b0b0c;
+  --bg-2: #101011;
+  --panel: #151516;
+  --panel-2: #1a1a1c;
+  --hover: #202022;
+  --border: #262628;
+  --border-2: #313134;
+  --text: #ececed;
+  --text-2: #b9b9bd;
+  --muted: #86868c;
   /* Monochrome accent: white on the dark theme, black on the light theme. */
   --accent: #f2f3f5;
   --accent-2: #f2f3f5;
@@ -21,7 +21,7 @@
   --down: #f0464f;
   --down-soft: rgba(240, 70, 79, .13);
   --warn: #f5a524;
-  --grid: #171d29;
+  --grid: #1a1a1c;
   --shadow: 0 10px 40px rgba(0, 0, 0, .45);
   --radius: 14px;
   color-scheme: dark;
@@ -224,7 +224,7 @@ select option { background: var(--panel); color: var(--text); }
 .avatar img { position: absolute; inset: 14%; width: 72%; height: 72%; object-fit: contain; opacity: 0; transition: opacity .2s; }
 .avatar.logo-ok { background: #fff !important; border: 1px solid rgba(0, 0, 0, .08); }
 .avatar.logo-ok img { opacity: 1; }
-.avatar.logo-ok.logo-light { background: #1b2130 !important; border: 1px solid rgba(255, 255, 255, .1); }
+.avatar.logo-ok.logo-light { background: #1e1e20 !important; border: 1px solid rgba(255, 255, 255, .1); }
 .avatar.logo-ok .mono-lbl { visibility: hidden; }
 
 /* news */
@@ -688,7 +688,7 @@ body.chart-expanded { overflow: hidden; }
 .set-user { display: flex; align-items: center; gap: 12px; }
 .set-user img, .set-user .ph { width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; }
 .set-user .ph { display: grid; place-items: center; color: var(--accent); font-weight: 700; border: 1.5px solid var(--accent); }
-.modal { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: rgba(5, 8, 14, .6); backdrop-filter: blur(4px); animation: fade .15s; }
+.modal { position: fixed; inset: 0; z-index: 55; display: grid; place-items: center; padding: 16px; background: rgba(6, 6, 7, .6); backdrop-filter: blur(4px); animation: fade .15s; }
 .modal-box { position: relative; width: min(420px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: var(--panel); border: 1px solid var(--border-2); border-radius: 18px; box-shadow: var(--shadow); padding: 26px 24px 22px; }
 .modal-box.wide { width: min(620px, 100%); }
 .modal-box h2 { font-size: 20px; margin-bottom: 6px; }
@@ -748,7 +748,7 @@ body.chart-expanded { overflow: hidden; }
 .ai-gate .btn { height: 32px; margin-left: auto; } /* stays right-aligned even when it wraps */
 
 /* ------------------------------------------------------------ palette */
-.palette { position: fixed; inset: 0; z-index: 50; background: rgba(5, 8, 14, .55); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; animation: fade .15s; }
+.palette { position: fixed; inset: 0; z-index: 50; background: rgba(6, 6, 7, .55); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; animation: fade .15s; }
 .palette-box { width: min(620px, calc(100vw - 32px)); background: var(--panel); border: 1px solid var(--border-2); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
 .palette-input { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
 .palette-input input { flex: 1; border: 0; outline: 0; background: none; color: var(--text); font: 500 16px Inter, sans-serif; }
