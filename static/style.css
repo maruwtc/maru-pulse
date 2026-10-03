@@ -921,3 +921,76 @@ body.side-collapsed .chat-view { max-width: none; }
   #chat-max { display: none; }
   .chat-fab { right: 16px; bottom: 16px; }
 }
+
+/* ------------------------------------------------------------ setup guide (#/guide) */
+.guide { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.guide .back { margin-bottom: 0; }
+.guide-hero { padding: 8px 0 4px; }
+.guide-kicker { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--link); margin-bottom: 6px; }
+.guide-hero h1 { font-size: 30px; }
+.guide-hero p { margin-top: 8px; max-width: 680px; color: var(--text-2); font-size: 15px; line-height: 1.6; }
+.guide-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.guide-needs li:not(.muted) { padding: 4px 10px; border: 1px solid var(--border); border-radius: 99px; background: var(--panel); color: var(--text-2); }
+.guide h3 { font-size: 15px; margin-bottom: 6px; }
+.guide-why p, .guide-notes dd { color: var(--text-2); line-height: 1.6; font-size: 13.5px; }
+.guide code { white-space: nowrap; font: 12px "JetBrains Mono", monospace; padding: 1px 5px; border-radius: 5px; background: var(--hover); color: var(--text); }
+.guide-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 16px; }
+.guide-step { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 24px; align-items: center; padding: 22px 24px; }
+.guide-num { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.guide-num span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--bg); font-size: 12px; letter-spacing: 0; }
+.guide-step h2 { font-size: 18px; margin: 10px 0 8px; }
+.guide-step ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; color: var(--text-2); font-size: 13.5px; line-height: 1.55; }
+.guide-step ul b { color: var(--text); font-weight: 600; }
+.guide-go { margin-top: 14px; font-size: 13px; color: var(--muted); }
+.guide-cta { margin-top: 16px; }
+.guide-notes dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px 16px; margin: 10px 0 14px; }
+.guide-notes dt { font-size: 13px; font-weight: 600; }
+.guide-notes dd { margin: 0; }
+
+/* drawn screen illustrations */
+.mock { margin: 0; border: 1px solid var(--border-2); border-radius: 12px; overflow: hidden; background: var(--bg-2); box-shadow: 0 6px 24px rgba(0, 0, 0, .18); font-size: 12px; color: var(--text); user-select: none; }
+.mock-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.mock-bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--border-2); }
+.mock-url { flex: 1; min-width: 0; margin-left: 8px; padding: 3px 10px; border-radius: 6px; background: var(--bg); color: var(--muted); font: 11px "JetBrains Mono", monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mock-body { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.mock .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mock .mono { font-family: "JetBrains Mono", monospace; }
+.mock .dim { color: var(--muted); font-size: 11px; }
+.mock-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.mock-btn { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-2); font-weight: 600; white-space: nowrap; }
+.mock-btn.solid { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.mock-btn.sm { height: 24px; padding: 0 9px; font-size: 11px; }
+.mock-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.mock-row.ghost { opacity: .55; }
+.mock-dot { width: 22px; height: 22px; border-radius: 6px; background: var(--hover); flex: none; }
+.mock-tag { padding: 2px 8px; border-radius: 99px; background: var(--up-soft); color: var(--up); font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+.mock-line { height: 7px; border-radius: 4px; background: var(--border-2); }
+.mock-line.w40 { width: 40%; } .mock-line.w50 { width: 50%; } .mock-line.w60 { width: 60%; }
+.mock-panel { display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--panel); }
+.mock-lbl { font-size: 11px; color: var(--muted); }
+.mock-lbl.caps { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.mock-field { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--bg-2); white-space: nowrap; overflow: hidden; }
+.mock-select { padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+.mock-form { display: flex; gap: 8px; }
+.mock-check { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
+.mock-box { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; background: var(--accent); color: var(--bg); font-size: 10px; font-weight: 800; }
+.mock-end { display: flex; justify-content: flex-end; }
+.mock-key { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg-2); border: 1px dashed var(--border-2); }
+.mock-warn { font-size: 11px; color: var(--warn); }
+/* what to click: blue ring + a pointer */
+.mock .hl { position: relative; outline: 2px solid var(--link); outline-offset: 3px; box-shadow: 0 0 0 7px color-mix(in srgb, var(--link) 16%, transparent); }
+.mock .click { position: relative; overflow: visible; }
+.mock .click::after { content: ""; position: absolute; right: -8px; bottom: -16px; width: 18px; height: 18px; pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M5 3l14 8-6.5 1.5L9 19z' fill='%23fff' stroke='%23111' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / contain; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .4)); }
+
+.set-links { display: inline-flex; gap: 14px; }
+.key-status .link { margin-left: auto; }
+.ai-gate-btns { display: inline-flex; align-items: center; gap: 14px; margin-left: auto; }
+.ai-gate-btns .btn { margin-left: 0; }
+
+@media (max-width: 900px) {
+  .guide-step { grid-template-columns: 1fr; gap: 18px; padding: 18px; }
+  .guide-hero h1 { font-size: 24px; }
+  .guide-notes dl { grid-template-columns: 1fr; gap: 2px 0; }
+  .guide-notes dd { margin-bottom: 8px; }
+}
