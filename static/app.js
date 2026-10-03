@@ -2474,6 +2474,146 @@ $("#style-tabs").addEventListener("click", (e) => {
 $$("#style-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.style === state.style));
 renderTfTabs();
 
+/* ================================================================ setup guide (#/guide) */
+// Free Gemma 4 via OpenRouter with the user's own Google AI Studio key (BYOK). Illustrations are drawn with CSS
+// (.mock) so they follow the theme; the real pages may look slightly different.
+const GUIDE_LINKS = {
+  studio: "https://aistudio.google.com/apikey",
+  integrations: "https://openrouter.ai/settings/integrations",
+  keys: "https://openrouter.ai/settings/keys",
+  limits: "https://openrouter.ai/docs/api/reference/limits",
+  byok: "https://openrouter.ai/docs/guides/overview/auth/byok",
+};
+const GUIDE_TEXT = {
+  en: {
+    back: "← Markets", kicker: "Setup guide", title: "Free AI with Gemma 4",
+    sub: "Run <b>Gemma 4 26B A4B IT (free)</b> in Maru Pulse with your own Google AI Studio key, routed through OpenRouter. No credit card needed — about 5 minutes.",
+    whyT: "Why link a Google key?",
+    why: "OpenRouter's free models share a small pool — <b>50 requests a day</b> per account. The free Gemma 4 model is served by Google AI Studio, so when you add your own AI Studio key, OpenRouter sends your requests through your key and they <b>no longer count against that daily cap</b>. You use Google's own free quota instead.",
+    need: "You'll need", needs: ["A Google account", "An OpenRouter account (free)", "This page open in another tab"],
+    open: "Open", step: "Step",
+    steps: [
+      { t: "Create a Google AI Studio API key", link: ["studio", "aistudio.google.com/apikey"],
+        b: ["Sign in with your Google account and open <b>API keys</b>.", "Click <b>Create API key</b>, then pick an existing Google Cloud project or create a new one.", "Copy the key — it starts with <code>AIza</code>.", "Skip billing: a key on a project without billing stays on the <b>free tier</b>."] },
+      { t: "Add it to OpenRouter as your own key", link: ["integrations", "openrouter.ai/settings/integrations"],
+        b: ["Sign in to OpenRouter and open <b>Settings → Integrations</b> (BYOK).", "Find <b>Google AI Studio</b> and paste your <code>AIza…</code> key.", "Keep the default fallback to <b>shared capacity</b>, so requests still work if your Google quota runs out.", "Save."] },
+      { t: "Create an OpenRouter API key", link: ["keys", "openrouter.ai/settings/keys"],
+        b: ["Open <b>Settings → API Keys</b> and click <b>Create API Key</b>.", "Name it, e.g. <i>Maru Pulse</i>. A credit limit is optional — the free model costs $0.", "Copy the <code>sk-or-v1-…</code> key right away — OpenRouter shows it <b>only once</b>."] },
+      { t: "Save it in Maru Pulse and pick Gemma", cta: "Open Settings",
+        b: ["Open <b>Settings</b> here and paste the <code>sk-or-v1-…</code> key under <b>OpenRouter API key</b>.", "Click <b>Verify &amp; save</b>.", "Set <b>Default AI model</b> to <b>Gemma 4 26b A4B IT (free)</b>. Done — AI analysis, trade ideas and the chat now run on Gemma."] },
+    ],
+    notesT: "Good to know",
+    notes: [
+      ["Limits", "Google's free tier for Gemma 4 is roughly <b>15 requests a minute</b> and <b>1,500 a day</b>. Google changes these, so check the rate-limit page in AI Studio."],
+      ["Cost", "The free model has no price, so OpenRouter's 5% BYOK fee comes to $0. Paid models in the list still bill your OpenRouter credits."],
+      ["Privacy", "On Google's free tier, prompts and responses may be used to improve Google's products. Don't paste anything confidential."],
+      ["Your key", "Maru Pulse stores your OpenRouter key encrypted on the server; this browser only ever sees its last characters."],
+      ["Trouble?", "<b>Verify failed</b> — make sure you pasted the OpenRouter key (<code>sk-or-…</code>), not the Google one. <b>Rate limited (429)</b> — wait a minute, or until the daily quota resets."],
+    ],
+    sources: "Sources:", srcLimits: "OpenRouter rate limits", srcByok: "OpenRouter BYOK",
+    m: { keys: "API keys", create: "Create API key", project: "Default Gemini Project", free: "Free tier", integ: "Integrations (BYOK)", provider: "Google AI Studio", apiKey: "API Key", fallback: "Fallback to shared capacity", save: "Save", orKeys: "API Keys", orCreate: "Create API Key", name: "Name", once: "Copy it now — shown only once", settings: "Settings", orKey: "OpenRouter API key", verify: "Verify & save", model: "Default AI model", copy: "Copy" },
+  },
+  zh: {
+    back: "← 市場", kicker: "設定教學", title: "用 Gemma 4 免費使用 AI",
+    sub: "透過 OpenRouter 連接你自己的 Google AI Studio 金鑰，在 Maru Pulse 使用 <b>Gemma 4 26B A4B IT（免費）</b>。不需信用卡，約 5 分鐘完成。",
+    whyT: "為甚麼要連接 Google 金鑰？",
+    why: "OpenRouter 的免費模型共用一個小額度——每個帳號<b>每日 50 次請求</b>。免費版 Gemma 4 由 Google AI Studio 提供，加入你自己的 AI Studio 金鑰後，OpenRouter 會用你的金鑰轉發請求，<b>不再計入該每日上限</b>，改為使用 Google 給你的免費額度。",
+    need: "你需要", needs: ["Google 帳號", "OpenRouter 帳號（免費）", "在另一個分頁開著本頁"],
+    open: "開啟", step: "步驟",
+    steps: [
+      { t: "建立 Google AI Studio API 金鑰", link: ["studio", "aistudio.google.com/apikey"],
+        b: ["用 Google 帳號登入，打開 <b>API keys</b>。", "按 <b>Create API key</b>，選擇現有的 Google Cloud 專案或建立新專案。", "複製金鑰——以 <code>AIza</code> 開頭。", "不用設定帳單：未啟用帳單的專案會維持在<b>免費方案</b>。"] },
+      { t: "在 OpenRouter 加入你自己的金鑰", link: ["integrations", "openrouter.ai/settings/integrations"],
+        b: ["登入 OpenRouter，打開 <b>Settings → Integrations</b>（BYOK）。", "找到 <b>Google AI Studio</b>，貼上你的 <code>AIza…</code> 金鑰。", "保留預設的<b>共用容量</b>備援，即使 Google 額度用完請求仍可運作。", "儲存。"] },
+      { t: "建立 OpenRouter API 金鑰", link: ["keys", "openrouter.ai/settings/keys"],
+        b: ["打開 <b>Settings → API Keys</b>，按 <b>Create API Key</b>。", "命名，例如 <i>Maru Pulse</i>。額度上限可不設——免費模型費用為 $0。", "立即複製 <code>sk-or-v1-…</code> 金鑰——OpenRouter <b>只會顯示一次</b>。"] },
+      { t: "在 Maru Pulse 儲存並選擇 Gemma", cta: "開啟設定",
+        b: ["在這裡打開<b>設定</b>，於 <b>OpenRouter API 金鑰</b>貼上 <code>sk-or-v1-…</code> 金鑰。", "按<b>驗證並儲存</b>。", "把<b>預設 AI 模型</b>設為 <b>Gemma 4 26b A4B IT (free)</b>。完成——AI 分析、交易建議與聊天助理都會使用 Gemma。"] },
+    ],
+    notesT: "注意事項",
+    notes: [
+      ["額度", "Google 免費方案的 Gemma 4 約為<b>每分鐘 15 次</b>、<b>每日 1,500 次</b>請求。Google 會調整，請以 AI Studio 的用量限制頁面為準。"],
+      ["費用", "免費模型沒有定價，因此 OpenRouter 的 5% BYOK 費用為 $0。清單中的付費模型仍會扣除你的 OpenRouter 額度。"],
+      ["私隱", "在 Google 免費方案下，提示與回應可能被用於改進 Google 的產品。請勿貼上機密資料。"],
+      ["你的金鑰", "Maru Pulse 在伺服器上加密儲存你的 OpenRouter 金鑰；瀏覽器只會看到最後幾個字元。"],
+      ["遇到問題？", "<b>驗證失敗</b>——確認貼上的是 OpenRouter 金鑰（<code>sk-or-…</code>），而不是 Google 金鑰。<b>請求過多（429）</b>——等一分鐘，或待每日額度重置。"],
+    ],
+    sources: "資料來源：", srcLimits: "OpenRouter 用量限制", srcByok: "OpenRouter BYOK",
+    m: { keys: "API keys", create: "Create API key", project: "Default Gemini Project", free: "Free tier", integ: "Integrations (BYOK)", provider: "Google AI Studio", apiKey: "API Key", fallback: "Fallback to shared capacity", save: "Save", orKeys: "API Keys", orCreate: "Create API Key", name: "Name", once: "Copy it now — shown only once", settings: "設定", orKey: "OpenRouter API 金鑰", verify: "驗證並儲存", model: "預設 AI 模型", copy: "Copy" },
+  },
+};
+const guideText = () => GUIDE_TEXT[LANG === "zh-Hant" ? "zh" : "en"];
+// Browser-window mock: window chrome + url bar around a drawn screen
+const mockWin = (url, body) => `<figure class="mock" aria-hidden="true"><div class="mock-bar"><i></i><i></i><i></i><span class="mock-url">${url}</span></div><div class="mock-body">${body}</div></figure>`;
+function guideMock(i, m) {
+  if (i === 0) return mockWin("aistudio.google.com/apikey", `
+    <div class="mock-top"><b>${m.keys}</b><span class="mock-btn solid hl click">＋ ${m.create}</span></div>
+    <div class="mock-row"><span class="mock-dot"></span><div class="grow"><b>${m.project}</b><div class="mono dim">AIza••••••••••••x9Qk</div></div><span class="mock-tag">${m.free}</span><span class="mock-btn sm">${m.copy}</span></div>
+    <div class="mock-row ghost"><span class="mock-line w60"></span></div>`);
+  if (i === 1) return mockWin("openrouter.ai/settings/integrations", `
+    <div class="mock-top"><b>${m.integ}</b></div>
+    <div class="mock-row ghost"><span class="mock-line w40"></span></div>
+    <div class="mock-panel hl"><b>${m.provider}</b>
+      <div class="mock-lbl">${m.apiKey}</div><div class="mock-field mono">AIza••••••••••••x9Qk</div>
+      <div class="mock-check"><span class="mock-box">✓</span>${m.fallback}</div>
+      <div class="mock-end"><span class="mock-btn solid click">${m.save}</span></div></div>
+    <div class="mock-row ghost"><span class="mock-line w50"></span></div>`);
+  if (i === 2) return mockWin("openrouter.ai/settings/keys", `
+    <div class="mock-top"><b>${m.orKeys}</b><span class="mock-btn solid">＋ ${m.orCreate}</span></div>
+    <div class="mock-panel"><div class="mock-lbl">${m.name}</div><div class="mock-field">Maru Pulse</div>
+      <div class="mock-key hl"><span class="mono grow">sk-or-v1-3f9a••••••••c2d7</span><span class="mock-btn sm click">${m.copy}</span></div>
+      <div class="mock-warn">⚠ ${m.once}</div></div>`);
+  return mockWin(`Maru Pulse · ${m.settings}`, `
+    <div class="mock-lbl caps">${m.orKey}</div>
+    <div class="mock-form"><div class="mock-field mono grow hl">sk-or-v1-3f9a…c2d7</div><span class="mock-btn click">${m.verify}</span></div>
+    <div class="mock-lbl">${m.model}</div>
+    <div class="mock-field mock-select hl"><span class="grow">Gemma 4 26b A4B IT (free)</span><span class="dim mono">free</span></div>`);
+}
+function renderGuide() {
+  const g = guideText();
+  const ext = (k, label) => `<a class="link" href="${GUIDE_LINKS[k]}" target="_blank" rel="noopener">${label} ↗</a>`;
+  $("#guide-view").innerHTML = `
+    <div class="guide">
+      <a href="#/" class="back">${g.back}</a>
+      <header class="guide-hero">
+        <div class="guide-kicker">${g.kicker}</div>
+        <h1>${g.title}</h1>
+        <p>${g.sub}</p>
+        <ul class="guide-needs"><li class="muted">${g.need}</li>${g.needs.map((n) => `<li>${n}</li>`).join("")}</ul>
+      </header>
+      <section class="card guide-why"><h3>${g.whyT}</h3><p>${g.why}</p></section>
+      <ol class="guide-steps">${g.steps.map((s, i) => `
+        <li class="card guide-step">
+          <div class="guide-text">
+            <div class="guide-num"><span>${i + 1}</span>${g.step} ${i + 1}</div>
+            <h2>${s.t}</h2>
+            <ul>${s.b.map((b) => `<li>${b}</li>`).join("")}</ul>
+            ${s.link ? `<p class="guide-go">${g.open} ${ext(s.link[0], s.link[1])}</p>` : `<button class="btn primary guide-cta" type="button">${s.cta}</button>`}
+          </div>
+          ${guideMock(i, g.m)}
+        </li>`).join("")}
+      </ol>
+      <section class="card guide-notes"><h3>${g.notesT}</h3>
+        <dl>${g.notes.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+        <p class="muted tiny">${g.sources} ${ext("limits", g.srcLimits)} · ${ext("byok", g.srcByok)}</p>
+      </section>
+    </div>`;
+  $(".guide-cta", $("#guide-view")).addEventListener("click", () => openSettings());
+}
+function showGuide() {
+  setChartExpanded(false);
+  state.symbol = null;
+  state.source?.close();
+  $("#home-view").hidden = true;
+  $("#stock-view").hidden = true;
+  $("#guide-view").hidden = false;
+  document.body.classList.remove("quote-docked");
+  document.title = `${guideText().kicker} · Maru Pulse`;
+  renderGuide();
+  renderWatchlist();
+}
+$("#guide-link").addEventListener("click", () => closeModal("#settings-modal"));
+
 /* ================================================================ routing */
 function go(symbol) {
   const hash = symbol ? `#/${encodeURIComponent(symbol.toUpperCase())}` : "#/";
@@ -2484,6 +2624,8 @@ function go(symbol) {
 async function route() {
   const symbol = decodeURIComponent(location.hash.replace(/^#\/?/, "")).toUpperCase();
   window.scrollTo(0, 0);
+  if (symbol === "GUIDE") return showGuide();
+  $("#guide-view").hidden = true;
   if (!symbol) {
     setChartExpanded(false);
     state.symbol = null;
@@ -2576,8 +2718,8 @@ function aiGateHTML(what) {
   if (!state.cfg) return "";
   what = t(what);
   if (!sb) return `<div class="ai-note warn">${t("AI {what} needs the server's Supabase settings (see README).", { what })}</div>`;
-  if (!state.user) return `<div class="ai-gate">${t("Sign in and add your own OpenRouter API key to use AI {what}.", { what })} <button class="btn primary" onclick="openAuth()">${t("Sign in")}</button></div>`;
-  return `<div class="ai-gate">${t("Add your OpenRouter API key to use AI {what}.", { what })} <button class="btn primary" onclick="openSettings()">${t("Add API key")}</button></div>`;
+  if (!state.user) return `<div class="ai-gate">${t("Sign in and add your own OpenRouter API key to use AI {what}.", { what })} <span class="ai-gate-btns"><a class="tiny link" href="#/guide">${t("Setup guide")}</a><button class="btn primary" onclick="openAuth()">${t("Sign in")}</button></span></div>`;
+  return `<div class="ai-gate">${t("Add your OpenRouter API key to use AI {what}.", { what })} <span class="ai-gate-btns"><a class="tiny link" href="#/guide">${t("Setup guide")}</a><button class="btn primary" onclick="openSettings()">${t("Add API key")}</button></span></div>`;
 }
 function promptAiSetup() {
   if (!state.user) return openAuth();
@@ -2652,7 +2794,7 @@ function renderKeyStatus() {
   const k = state.byok;
   $("#key-status").innerHTML = k
     ? `<span class="ok">✓ Key saved</span><span class="mono">sk-or-…${esc(k.key_hint)}</span><span class="muted tiny">${t("updated {ago}", { ago: ago(k.updated_at) })}</span><span class="sp"></span><button class="link-btn" id="key-remove" type="button" style="padding:0;color:var(--down)">Remove</button>`
-    : `<span class="none">No key saved</span><span class="muted tiny">AI analysis, trade ideas and position reviews are off until you add one.</span>`;
+    : `<span class="none">No key saved</span><span class="muted tiny">AI analysis, trade ideas and position reviews are off until you add one.</span><a class="tiny link" href="#/guide" onclick="closeModal('#settings-modal')">${t("Free key setup guide →")}</a>`;
   $("#key-input").placeholder = k ? "Paste a new key to replace it" : "sk-or-v1-…";
   $("#key-remove")?.addEventListener("click", removeKey);
 }

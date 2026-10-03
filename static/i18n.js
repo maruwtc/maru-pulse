@@ -244,7 +244,7 @@ const I18N = {
     "Sign in to Maru Pulse": "登入 Maru Pulse",
     "Sync your watchlist, positions and settings across devices, and use AI with your own OpenRouter key.": "在不同裝置同步自選清單、持倉與設定，並以你自己的 OpenRouter 金鑰使用 AI。",
     "Continue with Google": "使用 Google 繼續", "We only receive your name, email and profile picture from Google.": "我們只會從 Google 取得你的姓名、電子郵件與大頭貼。",
-    "Settings": "設定", "Account": "帳號", "Sign out": "登出", "OpenRouter API key": "OpenRouter API 金鑰", "Get a key ↗": "取得金鑰 ↗",
+    "Settings": "設定", "Account": "帳號", "Sign out": "登出", "OpenRouter API key": "OpenRouter API 金鑰", "Get a key ↗": "取得金鑰 ↗", "Setup guide": "設定教學", "Free key setup guide →": "免費金鑰設定教學 →",
     "Verify & save": "驗證並儲存", "Verifying…": "驗證中…", "Saving…": "儲存中…",
     "Preferences": "偏好設定", "Default AI model": "預設 AI 模型", "Theme": "主題", "Dark": "深色", "Light": "淺色",
     "Deep think by default": "預設啟用深度思考", "Show extended-hours trading on charts": "在圖表顯示盤前盤後交易",
