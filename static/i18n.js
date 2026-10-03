@@ -8,14 +8,14 @@
  */
 const LANGS = { en: "English", "zh-Hant": "繁體中文" };
 const LANG = (() => {
-  try { const s = localStorage.getItem("mp.lang"); if (s && LANGS[JSON.parse(s)]) return JSON.parse(s); } catch {}
+  try { const s = localStorage.getItem("mp.lang"); if (s && LANGS[JSON.parse(s)]) return JSON.parse(s); } catch { }
   return /^zh/i.test(navigator.language || "") ? "zh-Hant" : "en";
 })();
 const LOCALE = LANG === "zh-Hant" ? "zh-TW" : "en-US";
 document.documentElement.lang = LANG === "zh-Hant" ? "zh-Hant" : "en";
 
 function setLang(lang) {
-  try { localStorage.setItem("mp.lang", JSON.stringify(lang)); } catch {}
+  try { localStorage.setItem("mp.lang", JSON.stringify(lang)); } catch { }
   location.reload(); // every view re-renders in the new language
 }
 
@@ -26,8 +26,6 @@ const I18N = {
     "Sign in": "登入", "Toggle theme": "切換主題", "Back to top": "回到頂部", "Language": "語言",
     "Drag to reorder": "拖曳以排序", "⇅ drag to reorder": "⇅ 拖曳排序",
     "Collapse watchlist": "收合自選清單", "Expand watchlist": "展開自選清單",
-    "Data via OpenBB Platform · yfinance & SEC. Quotes may be delayed. Not investment advice.":
-      "資料來源：OpenBB Platform · yfinance 與 SEC。報價可能延遲，非投資建議。",
     "Market closed": "已收盤", "Pre-market": "盤前", "After hours": "盤後", "Market open · closes in {h}h {m}m": "開盤中 · {h} 小時 {m} 分後收盤",
     "Your watchlist is empty. Open a stock and tap": "自選清單是空的。打開一檔股票並點擊", "☆ Watch": "☆ 加入自選",
     "to track it here.": "即可在此追蹤。", "Remove": "移除", "Nothing yet": "尚無紀錄",
@@ -196,7 +194,6 @@ const I18N = {
     "chat": "聊天助理", "Ask Maru AI": "詢問 Maru AI", "Ask about markets, sectors & stocks": "問我市場、板塊與個股",
     "New chat": "新對話", "Maximize": "放大", "Restore": "還原", "Close": "關閉", "Send": "傳送",
     "Ask anything — e.g. what's your view on the electricity sector?": "問任何問題——例如：電力板塊有甚麼建議？",
-    "Uses live market data · educational only, not investment advice": "使用即時市場數據 · 僅供學習參考，並非投資建議",
     "Hi, I'm Maru AI": "你好，我是 Maru AI",
     "Ask me about any sector, stock or the market. I pull live quotes, sector performance, headlines and the economic calendar before answering.":
       "可以問我任何板塊、個股或大市。回答前我會讀取即時報價、板塊表現、新聞與經濟日曆。",
@@ -249,8 +246,6 @@ const I18N = {
     "Continue with Google": "使用 Google 繼續", "We only receive your name, email and profile picture from Google.": "我們只會從 Google 取得你的姓名、電子郵件與大頭貼。",
     "Settings": "設定", "Account": "帳號", "Sign out": "登出", "OpenRouter API key": "OpenRouter API 金鑰", "Get a key ↗": "取得金鑰 ↗",
     "Verify & save": "驗證並儲存", "Verifying…": "驗證中…", "Saving…": "儲存中…",
-    "Your key is checked with OpenRouter, then stored encrypted in Supabase Vault. It is never shown again or sent back to the browser — only this app's server decrypts it to run your AI requests, billed to your OpenRouter account.":
-      "你的金鑰會先經 OpenRouter 驗證，再加密存放於 Supabase Vault。之後不會再顯示或傳回瀏覽器——只有本服務的伺服器會解密以執行你的 AI 請求，費用計入你的 OpenRouter 帳戶。",
     "Preferences": "偏好設定", "Default AI model": "預設 AI 模型", "Theme": "主題", "Dark": "深色", "Light": "淺色",
     "Deep think by default": "預設啟用深度思考", "Show extended-hours trading on charts": "在圖表顯示盤前盤後交易",
     "Show support / resistance levels on charts": "在圖表顯示支撐／壓力價位", "USD per 1M tokens (input / output)": "每百萬 token 美元價格（輸入／輸出）",

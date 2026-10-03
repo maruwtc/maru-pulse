@@ -1371,6 +1371,102 @@ $$(".model-select").forEach((sel) => sel.addEventListener("change", (e) => {
   schedulePrefsSync();
 }));
 
+/* Themed dropdown over a native <select> (its popup can't be styled). The select stays the source of truth:
+   picking fires its "change" event, and setting .value / .selectedIndex / .hidden on it in code is mirrored. */
+function enhanceSelect(sel) {
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "dd-btn";
+  btn.setAttribute("aria-haspopup", "listbox"); btn.setAttribute("aria-expanded", "false");
+  const list = document.createElement("ul");
+  list.className = "dd-list"; list.setAttribute("role", "listbox"); list.hidden = true;
+  const wrap = document.createElement("div");
+  wrap.className = "dd";
+  sel.replaceWith(wrap);
+  wrap.append(btn, sel); // button first so clicking the wrapping <label> opens the menu
+  document.body.append(list); // outside the <label> (a click there would re-toggle the button) and any clipping container
+  sel.tabIndex = -1; // hidden by CSS (.dd select)
+  if (sel.hasAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+  wrap.hidden = sel.hidden;
+  let active = -1;
+  // "Name · price" labels render the price as a muted right-aligned column
+  const parts = (t) => { const i = t.lastIndexOf(" · "); return i < 0 ? [t, ""] : [t.slice(0, i), t.slice(i + 3)]; };
+  const render = () => {
+    const [name, price] = parts(sel.selectedOptions[0]?.textContent || "");
+    btn.innerHTML = `<span class="dd-name">${esc(name)}</span>${price ? `<span class="dd-price">${esc(price)}</span>` : ""}`;
+    btn.title = sel.title;
+    list.innerHTML = [...sel.options].map((o, i) => {
+      const [n, pr] = parts(o.textContent);
+      return `<li role="option" id="${sel.id || "dd"}-o${i}" data-i="${i}" aria-selected="${o.selected}"><span class="dd-name">${esc(n)}</span>${pr ? `<span class="dd-price">${esc(pr)}</span>` : ""}</li>`;
+    }).join("");
+  };
+  const setActive = (i) => {
+    const items = list.children;
+    if (!items.length) return;
+    active = Math.max(0, Math.min(items.length - 1, i));
+    [...items].forEach((li, j) => li.classList.toggle("active", j === active));
+    btn.setAttribute("aria-activedescendant", items[active].id);
+    items[active].scrollIntoView({ block: "nearest" });
+  };
+  const place = () => {
+    // fixed so the modal's scroll container can't clip it; flips above when there's no room below
+    const r = btn.getBoundingClientRect();
+    list.style.left = `${r.left}px`; list.style.minWidth = `${r.width}px`; list.style.maxWidth = `${innerWidth - r.left - 12}px`;
+    const below = innerHeight - r.bottom - 12, above = r.top - 12;
+    const up = below < Math.min(list.scrollHeight, 260) && above > below;
+    list.style.maxHeight = `${Math.min(260, up ? above : below)}px`;
+    list.style.top = up ? "" : `${r.bottom + 4}px`;
+    list.style.bottom = up ? `${innerHeight - r.top + 4}px` : "";
+  };
+  const close = () => {
+    if (list.hidden) return;
+    list.hidden = true; btn.setAttribute("aria-expanded", "false"); btn.removeAttribute("aria-activedescendant");
+    removeEventListener("scroll", onAway, true); removeEventListener("resize", onAway);
+  };
+  const onAway = (e) => { if (!list.contains(e.target)) close(); };
+  const open = () => {
+    render(); list.hidden = false; btn.setAttribute("aria-expanded", "true");
+    place(); setActive(sel.selectedIndex);
+    addEventListener("scroll", onAway, true); addEventListener("resize", onAway);
+  };
+  const pick = (i) => {
+    close(); btn.focus();
+    if (i === sel.selectedIndex) return;
+    sel.selectedIndex = i; render();
+    sel.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  btn.addEventListener("click", (e) => { e.preventDefault(); list.hidden ? open() : close(); });
+  btn.addEventListener("keydown", (e) => {
+    const k = e.key;
+    if (list.hidden) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(k)) { e.preventDefault(); open(); }
+      return;
+    }
+    if (k === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } // don't also close the modal
+    else if (k === "ArrowDown") { e.preventDefault(); setActive(active + 1); }
+    else if (k === "ArrowUp") { e.preventDefault(); setActive(active - 1); }
+    else if (k === "Home") { e.preventDefault(); setActive(0); }
+    else if (k === "End") { e.preventDefault(); setActive(list.children.length - 1); }
+    else if (k === "Enter" || k === " ") { e.preventDefault(); pick(active); }
+    else if (k === "Tab") close();
+  });
+  list.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus on the button
+  list.addEventListener("mousemove", (e) => { const li = e.target.closest("li"); if (li && +li.dataset.i !== active) setActive(+li.dataset.i); });
+  list.addEventListener("click", (e) => { const li = e.target.closest("li"); if (li) pick(+li.dataset.i); });
+  document.addEventListener("pointerdown", (e) => { if (!wrap.contains(e.target) && !list.contains(e.target)) close(); });
+  new MutationObserver(render).observe(sel, { childList: true });
+  sel.addEventListener("change", render);
+  // mirror programmatic changes made directly on the select
+  const proto = HTMLSelectElement.prototype, base = HTMLElement.prototype;
+  for (const k of ["value", "selectedIndex"]) {
+    const d = Object.getOwnPropertyDescriptor(proto, k);
+    Object.defineProperty(sel, k, { configurable: true, get() { return d.get.call(this); }, set(v) { d.set.call(this, v); render(); } });
+  }
+  const hd = Object.getOwnPropertyDescriptor(base, "hidden");
+  Object.defineProperty(sel, "hidden", { configurable: true, get() { return wrap.hidden; }, set(v) { hd.set.call(wrap, v); if (v) close(); } });
+  render();
+}
+$$(".model-select, #opt-exp, #opt-strikes").forEach(enhanceSelect);
+
 function aiEmpty(symbol) {
   const cached = store.get(`mp.ai.${symbol}`, null);
   if (cached) return showAnalysis(cached.text, cached, false);
