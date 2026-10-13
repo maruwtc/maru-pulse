@@ -91,6 +91,7 @@ body.quote-docked .top-quote { max-width: 360px; padding: 0 12px 0 6px; border-w
 .tq-sym { font-weight: 700; font-size: 14px; }
 .tq-px { font-weight: 600; font-size: 14px; }
 .tq-ch { min-width: 0; }
+.tq-tag { font: 600 10px "JetBrains Mono", monospace; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; margin-right: -4px; }
 .lang-btn { font: 600 13px Inter, sans-serif; color: var(--text-2); }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .icon-btn { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; border: 1px solid var(--border); background: transparent; cursor: pointer; color: var(--text-2); }

@@ -246,6 +246,33 @@ def get_ext(symbol: str) -> dict:
     return get_ext_many([symbol])[symbol]
 
 
+def latest_price(symbol: str, q: dict | None = None) -> tuple[float | None, dict | None]:
+    """The most recent trade: the pre-market / after-hours print outside the regular session, else the quote.
+
+    Returns (price, extended session or None) so callers can say which session the price is from."""
+    q = q or get_quote(symbol)
+    try:
+        sess = get_ext(symbol).get("session")
+    except Exception:
+        sess = None
+    if sess and sess.get("price"):
+        return sess["price"], sess
+    return q.get("last_price"), None
+
+
+def price_note(symbol: str, q: dict | None = None) -> str:
+    """A one-line statement of the latest price for AI prompts, making the extended-hours print explicit."""
+    q = q or get_quote(symbol)
+    price, sess = latest_price(symbol, q)
+    if not sess:
+        return f"LATEST PRICE: {price} (regular session, {(q.get('change_percent') or 0):+.2f}% today)."
+    when = datetime.fromtimestamp(sess["time"], NY).strftime("%Y-%m-%d %H:%M ET") if isinstance(sess.get("time"), (int, float)) else ""
+    close = round(q["last_price"], 2) if q.get("last_price") else None
+    return (f"LATEST PRICE: {price} — {sess['label'].lower()} {when} ({(sess.get('change_percent') or 0):+.2f}% vs the regular "
+            f"close {close}). The regular-session 'last_price' is stale; use {price} as the current "
+            f"price for P/L, distances to levels, stops and targets.")
+
+
 def get_history(symbol: str, rng: str, extended: bool = False) -> dict:
     interval, days, intraday = RANGES[rng]
     extended = extended and rng in ("1D", "5D")
@@ -376,7 +403,28 @@ def history(symbol: str, range: str = "1D", ext: bool = True):
 
 @app.get("/api/news/{symbol}")
 def company_news(symbol: str, limit: int = 20):
-    return get_news(symbol.upper(), limit)
+    """A symbol's news; for a leveraged / inverse ETF, merged with its underlying's (the ETF itself rarely has any)."""
+    symbol = symbol.upper()
+    try:
+        und = related_symbols(symbol)["underlying"] if "," not in symbol else None
+    except Exception:
+        und = None
+    if not und:
+        return get_news(symbol, limit)
+    items, err = [], None
+    for sym in (symbol, und):
+        try:
+            items += [{**n, "symbol": n.get("symbol") or sym} for n in get_news(sym, limit)]
+        except HTTPException as e:
+            err = e
+    if not items:
+        raise err or HTTPException(502, "No news available.")
+    seen, uniq = set(), []
+    for n in sorted(items, key=lambda x: x.get("date") or "", reverse=True):
+        if n["title"] not in seen:
+            seen.add(n["title"])
+            uniq.append(n)
+    return uniq[:limit]
 
 
 @app.get("/api/market-news")
@@ -473,7 +521,10 @@ def overview(symbol: str):
             pass
         return out
 
-    return cached(f"overview:{symbol}", 3600, load)
+    out = cached(f"overview:{symbol}", 3600, load)
+    if not out.get("name"):  # the profile call failed (Yahoo hiccup) — don't keep the gap for an hour
+        _cache.pop(f"overview:{symbol}", None)
+    return out
 
 
 @app.get("/api/stream/{symbol}")
@@ -524,7 +575,7 @@ LEVERAGED_ETFS = {
     "AAPU": ("AAPL", 2), "AAPD": ("AAPL", -1), "MSFU": ("MSFT", 2), "MSFD": ("MSFT", -1), "AMZU": ("AMZN", 2),
     "AMZD": ("AMZN", -1), "GGLL": ("GOOGL", 2), "GGLS": ("GOOGL", -1), "METU": ("META", 2), "METD": ("META", -1),
     "CONL": ("COIN", 2), "MSTU": ("MSTR", 2), "MSTX": ("MSTR", 2), "MSTZ": ("MSTR", -2), "AMDL": ("AMD", 2),
-    "PLTU": ("PLTR", 2), "AVL": ("AVGO", 2), "AVGX": ("AVGO", 2), "MUU": ("MU", 2), "TSMX": ("TSM", 2),
+    "PLTU": ("PLTR", 2), "AVL": ("AVGO", 2), "AVGX": ("AVGO", 2), "MUU": ("MU", 2), "MULL": ("MU", 2), "TSMX": ("TSM", 2),
 }
 
 # Peer groups by theme / supply chain; a stock's peers are the other members of every group it is in.
@@ -585,7 +636,8 @@ def related_symbols(symbol: str) -> dict:
     """Underlying (for leveraged ETFs), peers and sector ETF for a symbol."""
     def load():
         prof = overview(symbol)
-        out = {"underlying": None, "leverage": None, "peers": [], "sector_etf": None}
+        out = {"underlying": None, "leverage": None, "peers": [], "sector_etf": None,
+               "_named": bool(prof.get("name")) or symbol in LEVERAGED_ETFS}
         lev = leveraged_underlying(symbol, prof.get("name"))
         base = symbol
         if lev:
@@ -601,7 +653,10 @@ def related_symbols(symbol: str) -> dict:
         out["sector_etf"] = "SMH" if "semiconductor" in ind else SECTOR_ETFS.get(sec)
         return out
 
-    return cached(f"related:{symbol}", 3600, load)
+    out = cached(f"related:{symbol}", 3600, load)
+    if not out.get("_named"):  # resolved without the fund name, so a leveraged ETF may have been missed — retry next time
+        _cache.pop(f"related:{symbol}", None)
+    return out
 
 
 def performance_table(symbols: list[str]) -> list[dict]:
@@ -677,7 +732,7 @@ class AnalyzeRequest(BaseModel):
 
 def build_context(symbol: str, related: bool = True) -> str:
     q = get_quote(symbol)
-    parts = [f"## Quote\n{json.dumps({k: q.get(k) for k in ('name', 'last_price', 'change_percent', 'open', 'high', 'low', 'prev_close', 'volume', 'volume_average', 'year_high', 'year_low', 'ma_50d', 'ma_200d', 'currency')}, default=str)}"]
+    parts = [f"## Quote\n{price_note(symbol, q)}\n{json.dumps({k: q.get(k) for k in ('name', 'last_price', 'change_percent', 'open', 'high', 'low', 'prev_close', 'volume', 'volume_average', 'year_high', 'year_low', 'ma_50d', 'ma_200d', 'currency')}, default=str)}"]
 
     try:
         m = records(obb_call(obb.equity.fundamental.metrics, symbol, provider=PROVIDER))[0]
@@ -1297,7 +1352,7 @@ def build_chat_context(text: str, symbol: str | None, watchlist: list[str]) -> t
 
     if symbol and symbol not in tickers:
         try:
-            parts.append(f"## Stock the user is viewing in the app\n{_quote_line(get_quote(symbol))}")
+            parts.append(f"## Stock the user is viewing in the app\n{_quote_line(q := get_quote(symbol))}\n{price_note(symbol, q)}")
         except Exception:
             pass
     if watchlist:
@@ -1472,11 +1527,11 @@ Return ONLY a JSON object with exactly this shape:
 
 def build_trade_context(symbol: str) -> tuple[str, dict]:
     q = get_quote(symbol)
-    spot = q["last_price"]
+    spot, _ = latest_price(symbol, q)
     sig = get_signals(symbol)
     tech, opts = sig["technicals"], sig["options"]
     parts = [
-        f"## Quote\nprice {spot}, change {q.get('change_percent') and round(q['change_percent'], 2)}%, "
+        f"## Quote\n{price_note(symbol, q)}\nregular session: price {q['last_price']}, change {q.get('change_percent') and round(q['change_percent'], 2)}%, "
         f"day range {q.get('low')}-{q.get('high')}, volume {q.get('volume')} vs avg {q.get('volume_average')}",
         f"## Technicals\n{json.dumps(tech)}",
     ]
@@ -1763,7 +1818,9 @@ def options_flow(chain: pd.DataFrame, spot: float, n: int = 4) -> dict:
 
 
 def evaluate(symbol: str, positions: list[Position]) -> dict:
-    spot = get_quote(symbol)["last_price"]
+    """Mark positions to market at the latest price — the pre-market / after-hours print outside the regular
+    session (shares trade there; option marks stay at the last regular-session quote)."""
+    spot, sess = latest_price(symbol)
     sig = get_signals(symbol)
     chain = None
     if any(p.kind == "option" for p in positions):
@@ -1774,6 +1831,7 @@ def evaluate(symbol: str, positions: list[Position]) -> dict:
     iv30 = (sig.get("options") or {}).get("iv30")
     ev = trading.evaluate_positions([p.model_dump() for p in positions], chain, spot, iv30)
     ev["signals"] = sig
+    ev["session"] = ext_brief({"session": sess})
     return ev
 
 
@@ -1822,8 +1880,8 @@ def build_review_context(symbol: str, positions: list[Position], question: str |
                                     "moneyness", "iv", "strike", "expiration", "type", "side")} for r in ev["rows"]]
     payoff = {k: v for k, v in (ev["payoff"] or {}).items() if k != "curve"} or None
     parts = [
-        f"## Quote\nprice {spot}, change {q.get('change_percent') and round(q['change_percent'], 2)}%",
-        f"## Positions (marked to market; delta in share-equivalents, theta in $/day)\n{json.dumps(rows)}",
+        f"## Quote\n{price_note(symbol, q)}\nregular session: price {q['last_price']}, change {q.get('change_percent') and round(q['change_percent'], 2)}%",
+        f"## Positions (marked to market at the latest price; delta in share-equivalents, theta in $/day)\n{json.dumps(rows)}",
         f"## Totals\n{json.dumps(ev['total'])}",
         f"## Combined payoff at first expiration\n{json.dumps(payoff)}" if payoff else "",
         f"## Technicals\n{json.dumps(sig['technicals'])}",
