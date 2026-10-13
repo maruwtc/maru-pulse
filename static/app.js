@@ -131,17 +131,19 @@ function renderStatus() {
 }
 
 /* ================================================================ theme */
-function applyTheme(t) {
-  document.documentElement.dataset.theme = t;
-  try { localStorage.setItem("mp.theme", t); } catch {}
-  schedulePrefsSync();
+// The preference is "system" (follow the device), "dark" or "light"; data-theme always holds the resolved one.
+const deviceLight = matchMedia("(prefers-color-scheme: light)");
+function themePref() {
+  try { return localStorage.getItem("mp.theme") || "dark"; } catch { return "dark"; }
+}
+function applyTheme(pref, sync = true) {
+  document.documentElement.dataset.theme = pref === "system" ? (deviceLight.matches ? "light" : "dark") : pref;
+  try { localStorage.setItem("mp.theme", pref); } catch {}
+  if (sync) schedulePrefsSync();
   chart.applyOptions(chartTheme());
   if (state.bars.length) renderChart(false);
 }
-$("#lang-btn").textContent = LANG === "en" ? "中" : "EN"; // shows the language you switch to
-$("#lang-btn").title = $("#lang-btn").ariaLabel = LANG === "en" ? "切換為繁體中文" : "Switch to English";
-$("#lang-btn").addEventListener("click", () => setLang(LANG === "en" ? "zh-Hant" : "en"));
-$("#theme-btn").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light"));
+deviceLight.addEventListener("change", () => { if (themePref() === "system") applyTheme("system", false); });
 
 /* ================================================================ chart */
 function chartTheme() {
@@ -1176,7 +1178,7 @@ function renderWatchlist() {
       ${spark(state.sparks[s], { w: 56, h: 24, ref: prev, fill: false })}
       <div class="px"><div class="mono">${fmt(q.price)}</div><span class="chg-chip ${cls(q.change_percent)}" style="min-width:0;padding:0 4px">${pct(q.change_percent)}</span>
         ${q.ext ? `<div class="ext-mini" title="${esc(q.ext.label)} ${fmt(q.ext.price)}">${extShort(q.ext)} <b class="${cls(q.ext.change_percent)}">${pct(q.ext.change_percent)}</b></div>` : ""}</div>
-      <button class="rm" title="Remove" data-rm="${esc(s)}">×</button>
+      <button class="rm" title="Remove" aria-label="Remove" data-rm="${esc(s)}"><svg viewBox="0 0 24 24" class="i"><path d="M7 7l10 10M17 7L7 17" /></svg></button>
     </li>`;
   }).join("");
 }
@@ -2803,6 +2805,7 @@ const avatarUrl = (u) => u?.user_metadata?.avatar_url || u?.user_metadata?.pictu
 function renderAccount() {
   const b = $("#account-btn");
   b.hidden = !sb;
+  $("#settings-btn").hidden = !!(sb && state.user); // signed in, the avatar opens Settings
   if (!sb) return;
   const u = state.user;
   b.classList.toggle("signed-in", !!u);
@@ -2815,18 +2818,30 @@ function renderAccount() {
 $("#account-btn").addEventListener("click", () => (state.user ? openSettings() : openAuth()));
 
 /* ---------------- settings */
+// Signed out, Settings still opens for language / theme / chart preferences (stored in this browser only).
 function openSettings() {
-  if (!state.user) return openAuth();
   const u = state.user, pic = avatarUrl(u);
-  $("#set-user").innerHTML = `${pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc(displayName(u)[0].toUpperCase())}</span>`}
+  $("#set-user").innerHTML = !u
+    ? `<span class="ph">?</span><div><b>${t("Not signed in")}</b><div class="muted tiny">${t(sb ? "Sign in to use AI and sync your watchlist and settings across devices." : "Preferences are saved in this browser.")}</div></div>`
+    : `${pic ? `<img src="${esc(pic)}" alt="" referrerpolicy="no-referrer">` : `<span class="ph">${esc(displayName(u)[0].toUpperCase())}</span>`}
     <div><b>${esc(displayName(u))}</b><div class="muted tiny">${t("{email} · Google account · data syncs across devices", { email: esc(u.email || "") })}</div></div>`;
-  renderKeyStatus();
-  $$("#pref-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === (document.documentElement.dataset.theme === "light" ? "light" : "dark")));
+  $("#signout-btn").hidden = !u;
+  $("#set-signin-btn").hidden = !!u || !sb;
+  $("#set-key-section").hidden = !u;
+  if (u) renderKeyStatus();
+  $$("#pref-theme button").forEach((b) => b.classList.toggle("active", b.dataset.theme === themePref()));
+  $$("#pref-lang button").forEach((b) => b.classList.toggle("active", b.dataset.lang === LANG));
   $("#pref-ext").checked = state.showExt;
   $("#pref-levels").checked = state.showLevels;
   openModal("#settings-modal");
 }
 $("#signout-btn").addEventListener("click", async () => { closeModal("#settings-modal"); await sb.auth.signOut(); toast("Signed out", false); });
+$("#set-signin-btn").addEventListener("click", () => { closeModal("#settings-modal"); openAuth(); });
+$("#settings-btn").addEventListener("click", () => openSettings());
+$("#pref-lang").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b && b.dataset.lang !== LANG) setLang(b.dataset.lang);
+});
 $("#pref-theme").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -2891,7 +2906,7 @@ async function removeKey() {
 /* ---------------- preferences sync */
 function currentPrefs() {
   return {
-    theme: document.documentElement.dataset.theme === "light" ? "light" : "dark",
+    theme: themePref(),
     model: store.get("mp.model", null), risk: state.risk, deep: store.get("mp.deep", false),
     ext: state.showExt, levels: state.showLevels, calTab: state.calTab, calFilter: state.calFilter,
   };
