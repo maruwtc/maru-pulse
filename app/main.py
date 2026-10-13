@@ -509,6 +509,155 @@ async def stream(request: Request, symbol: str, interval: float = 5):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ---------------------------------------------------------------- related tickers (AI context)
+
+# Leveraged / inverse single-stock and index ETFs → (underlying, daily leverage). Unknown ones fall back to
+# parsing the fund name, e.g. "GraniteShares 2x Long NVDA Daily ETF".
+LEVERAGED_ETFS = {
+    "TQQQ": ("QQQ", 3), "SQQQ": ("QQQ", -3), "QLD": ("QQQ", 2), "QID": ("QQQ", -2),
+    "UPRO": ("SPY", 3), "SPXL": ("SPY", 3), "SPXU": ("SPY", -3), "SPXS": ("SPY", -3), "SSO": ("SPY", 2), "SDS": ("SPY", -2),
+    "UDOW": ("DIA", 3), "SDOW": ("DIA", -3), "TNA": ("IWM", 3), "TZA": ("IWM", -3),
+    "SOXL": ("SOXX", 3), "SOXS": ("SOXX", -3), "USD": ("SMH", 2), "TECL": ("XLK", 3), "TECS": ("XLK", -3),
+    "FAS": ("XLF", 3), "FAZ": ("XLF", -3), "LABU": ("XBI", 3), "LABD": ("XBI", -3), "FNGU": ("FNGS", 3),
+    "NVDL": ("NVDA", 2), "NVDU": ("NVDA", 2), "NVDX": ("NVDA", 2), "NVDD": ("NVDA", -1), "NVD": ("NVDA", -2),
+    "TSLL": ("TSLA", 2), "TSLT": ("TSLA", 2), "TSLR": ("TSLA", 2), "TSLQ": ("TSLA", -2), "TSLZ": ("TSLA", -2), "TSLS": ("TSLA", -1),
+    "AAPU": ("AAPL", 2), "AAPD": ("AAPL", -1), "MSFU": ("MSFT", 2), "MSFD": ("MSFT", -1), "AMZU": ("AMZN", 2),
+    "AMZD": ("AMZN", -1), "GGLL": ("GOOGL", 2), "GGLS": ("GOOGL", -1), "METU": ("META", 2), "METD": ("META", -1),
+    "CONL": ("COIN", 2), "MSTU": ("MSTR", 2), "MSTX": ("MSTR", 2), "MSTZ": ("MSTR", -2), "AMDL": ("AMD", 2),
+    "PLTU": ("PLTR", 2), "AVL": ("AVGO", 2), "AVGX": ("AVGO", 2), "MUU": ("MU", 2), "TSMX": ("TSM", 2),
+}
+
+# Peer groups by theme / supply chain; a stock's peers are the other members of every group it is in.
+PEER_GROUPS = [
+    ["MU", "TSM", "SNDK", "WDC", "STX", "NVDA", "AMD"],                  # memory & storage (+ the AI demand drivers)
+    ["NVDA", "AMD", "TSM", "AVGO", "MU", "MRVL", "ARM", "QCOM", "INTC"],  # semiconductors
+    ["TSM", "ASML", "AMAT", "LRCX", "KLAC", "INTC", "NVDA"],              # foundry & equipment
+    ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA"],                   # megacap tech
+    ["MSFT", "ORCL", "CRM", "NOW", "ADBE", "SNOW", "PLTR"],              # software & cloud
+    ["CRWD", "PANW", "ZS", "FTNT", "NET"],                               # cybersecurity
+    ["TSLA", "RIVN", "LCID", "NIO", "LI", "XPEV"],                       # EVs
+    ["COIN", "MSTR", "HOOD", "MARA", "RIOT", "IBIT"],                    # crypto
+    ["JPM", "BAC", "WFC", "C", "GS", "MS"],                              # banks
+    ["V", "MA", "PYPL", "AXP"],                                          # payments
+    ["NFLX", "DIS", "WBD", "ROKU", "SPOT"],                              # streaming & media
+    ["WMT", "COST", "TGT", "AMZN", "HD"],                                # retail
+    ["LLY", "NVO", "PFE", "MRK", "JNJ", "ABBV"],                         # pharma
+    ["XOM", "CVX", "COP", "OXY", "SLB"],                                 # energy
+    ["DAL", "UAL", "AAL", "LUV"],                                        # airlines
+    ["BABA", "PDD", "JD", "BIDU"],                                       # China internet
+]
+SECTOR_ETFS = {
+    "technology": "XLK", "financial services": "XLF", "healthcare": "XLV", "energy": "XLE",
+    "consumer cyclical": "XLY", "consumer defensive": "XLP", "industrials": "XLI", "utilities": "XLU",
+    "real estate": "XLRE", "basic materials": "XLB", "communication services": "XLC",
+}
+NAME_STOPWORDS = {"ETF", "ETN", "ETFS", "USD", "DAILY", "LONG", "SHORT", "BULL", "BEAR", "SHARES", "TRUST", "FUND", "INC"}
+
+
+def leveraged_underlying(symbol: str, name: str | None) -> tuple[str, float] | None:
+    if symbol in LEVERAGED_ETFS:
+        return LEVERAGED_ETFS[symbol]
+    n = name or ""
+    m = re.search(r"(-?\d(?:\.\d+)?)\s*[xX]\b", n)
+    if not m or not re.search(r"(?i)\b(long|short|bull|bear|inverse|ultra|leveraged)\b", n):
+        return None
+    lev = float(m.group(1)) * (-1 if re.search(r"(?i)\b(short|bear|inverse)\b", n) else 1)
+    for tok in re.findall(r"\b[A-Z]{1,5}\b", n):
+        if tok not in NAME_STOPWORDS and tok != symbol:
+            return tok, lev
+    return None
+
+
+def industry_peers(industry: str | None, exclude: str) -> list[str]:
+    """Largest companies in the same Yahoo industry, as a fallback for stocks outside PEER_GROUPS."""
+    if not industry:
+        return []
+    try:
+        import yfinance as yf
+        key = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", industry.lower().replace("&", ""))).strip("-")
+        top = yf.Industry(key).top_companies
+        return [s for s in list(top.index)[:8] if s != exclude and "." not in s][:6] if top is not None else []
+    except Exception:
+        return []
+
+
+def related_symbols(symbol: str) -> dict:
+    """Underlying (for leveraged ETFs), peers and sector ETF for a symbol."""
+    def load():
+        prof = overview(symbol)
+        out = {"underlying": None, "leverage": None, "peers": [], "sector_etf": None}
+        lev = leveraged_underlying(symbol, prof.get("name"))
+        base = symbol
+        if lev:
+            out["underlying"], out["leverage"] = lev
+            base = lev[0]
+            prof = overview(base)
+        peers = []
+        for g in PEER_GROUPS:
+            if base in g:
+                peers += [s for s in g if s != base and s not in peers]
+        out["peers"] = peers[:6] or industry_peers(prof.get("industry_category"), base)
+        ind, sec = (prof.get("industry_category") or "").lower(), (prof.get("sector") or "").lower()
+        out["sector_etf"] = "SMH" if "semiconductor" in ind else SECTOR_ETFS.get(sec)
+        return out
+
+    return cached(f"related:{symbol}", 3600, load)
+
+
+def performance_table(symbols: list[str]) -> list[dict]:
+    """1-day / 5-day / 1-month / 3-month % returns from daily closes."""
+    start = (datetime.now(NY) - timedelta(days=110)).date()
+    df = obb_call(obb.equity.price.historical, ",".join(symbols), start_date=start, provider=PROVIDER)
+    if "symbol" not in df:
+        df["symbol"] = symbols[0]
+    out = []
+    for sym in symbols:
+        c = [float(x) for x in df[df["symbol"] == sym]["close"] if x == x]
+        if len(c) < 2:
+            continue
+        ret = lambda n: round((c[-1] / c[-1 - n] - 1) * 100, 2) if len(c) > n else None
+        out.append({"symbol": sym, "close": round(c[-1], 2), "1d%": ret(1), "5d%": ret(5), "1m%": ret(21), "3m%": ret(63)})
+    return out
+
+
+def related_context(symbol: str) -> str:
+    """Read-through context for AI prompts: the underlying of a leveraged ETF, peers, sector and market."""
+    def load():
+        try:
+            rel = related_symbols(symbol)
+        except Exception:
+            return ""
+        parts = []
+        und = rel["underlying"]
+        if und:
+            lev = rel["leverage"]
+            parts.append(f"## Underlying asset\n{symbol} is a {'inverse ' if lev < 0 else ''}leveraged ETF targeting {lev:g}x the DAILY "
+                         f"return of {und}. Its direction is driven by {und}, so analyse {und}'s news, fundamentals, earnings "
+                         f"and trend; also account for daily-reset volatility decay over multi-day holds.")
+            try:
+                parts.append(f"### {und} context\n" + build_context(und, related=False))
+            except Exception:
+                pass
+        base = und or symbol
+        syms = [base] + rel["peers"] + [s for s in (rel["sector_etf"], "SPY", "QQQ") if s and s != base]
+        syms = list(dict.fromkeys(syms))
+        try:
+            parts.append(f"## Relative performance ({base} vs peers, sector ETF {rel['sector_etf'] or 'n/a'} and market)\n"
+                         + "\n".join(json.dumps(r) for r in performance_table(syms)))
+        except HTTPException:
+            pass
+        if rel["peers"]:
+            try:
+                news = get_news(",".join(rel["peers"][:4]), 10)
+                parts.append("## Peer headlines (read-through for the sector / supply chain)\n" + "\n".join(
+                    f"- [{(n.get('date') or '')[:10]}] {n.get('symbol') or ''}: {n['title']}" for n in news))
+            except HTTPException:
+                pass
+        return "\n\n".join(parts)
+
+    return cached(f"relctx:{symbol}", 900, load)
+
+
 # ---------------------------------------------------------------- AI analysis
 
 
@@ -526,7 +675,7 @@ class AnalyzeRequest(BaseModel):
     lang: str | None = None  # UI language, e.g. "zh-Hant"
 
 
-def build_context(symbol: str) -> str:
+def build_context(symbol: str, related: bool = True) -> str:
     q = get_quote(symbol)
     parts = [f"## Quote\n{json.dumps({k: q.get(k) for k in ('name', 'last_price', 'change_percent', 'open', 'high', 'low', 'prev_close', 'volume', 'volume_average', 'year_high', 'year_low', 'ma_50d', 'ma_200d', 'currency')}, default=str)}"]
 
@@ -587,7 +736,10 @@ def build_context(symbol: str) -> str:
     except HTTPException:
         pass
 
-    if cal := calendar_context(symbol):
+    if related and (rel := related_context(symbol)):
+        parts.append(rel)
+
+    if related and (cal := calendar_context(symbol)):
         parts.append(cal)
 
     return "\n\n".join(parts)
@@ -599,9 +751,14 @@ analysis in Markdown with these sections:
 ### News & Sentiment  (key themes from the headlines, sentiment per theme, what matters most)
 ### Price Action & Technicals  (trend vs 50/200-day averages, momentum, position in 52-week range)
 ### Fundamentals & Valuation  (valuation multiples, growth, margins, balance sheet)
+### Peers & Sector  (how peers, the sector ETF and the market performed vs this stock, and read-through from peer
+news — e.g. TSM / memory pricing for MU; is the move stock-specific or sector-wide?)
 ### Macro Backdrop  (recent US data like CPI / jobs vs consensus and upcoming critical releases, and what they mean for this stock)
 ### Bull Case / Bear Case  (bullets)
 ### Key Risks & Catalysts to Watch
+If the symbol is a leveraged / inverse ETF, base the analysis on its UNDERLYING (news, fundamentals, earnings, technicals
+in the "Underlying asset" data), translate the view through the leverage and direction, and explain volatility decay
+instead of company fundamentals for the ETF itself.
 Be specific with numbers. Say when data is missing. End with a one-line reminder that this is not investment advice."""
 
 
@@ -1279,6 +1436,8 @@ Rules:
 - If the setup is unclear, say so: set stock_trade.direction to "none", set entry/stop/targets to null, and offer a neutral strategy (e.g. iron condor).
 - If you give entry/stop/targets, direction MUST be "long" or "short" (use a limit entry zone for "wait for pullback" setups).
 - Give 2-3 option ideas that express different trade-offs (e.g. directional debit spread, income/credit, higher-conviction long option).
+- Use the related data: for a leveraged / inverse ETF, form the view on its UNDERLYING and translate it through the
+  leverage (mention volatility decay for multi-day holds); check whether peers / the sector ETF confirm or diverge from the move.
 - Be concise and specific; numbers over adjectives.
 
 Return ONLY a JSON object with exactly this shape:
@@ -1335,6 +1494,8 @@ def build_trade_context(symbol: str) -> tuple[str, dict]:
         parts.append("## Headlines\n" + "\n".join(f"- [{(n.get('date') or '')[:10]}] {n['title']}" for n in news))
     except HTTPException:
         pass
+    if rel := related_context(symbol):
+        parts.append(rel)
     if cal := calendar_context(symbol):
         parts.append(cal + "\n(Account for these: e.g. earnings inflate IV and gap risk; avoid holding short premium through them unless intended.)")
     return "\n\n".join(parts), {"spot": spot, "chain": chain, "signals": sig}
@@ -1629,7 +1790,8 @@ give a candid, practical review. Consider: is the original thesis still intact v
 position risk (delta exposure, theta decay, days to expiration, short-option assignment risk, concentration of payoff),
 where to take profit or cut loss (use support/resistance, ATR and the expected move), and whether to hold, trim, close,
 roll (later expiration / different strike), or hedge (e.g. collar, protective put, covered call, converting a long option
-into a spread). Adjustment legs MUST use contracts from the CONTRACTS table. If the trader asked a question, answer it
+into a spread). Use the related data: for a leveraged / inverse ETF judge the thesis on its UNDERLYING and flag
+volatility decay; check whether peers / the sector confirm the move. Adjustment legs MUST use contracts from the CONTRACTS table. If the trader asked a question, answer it
 directly and specifically in "answer". Be concise; numbers over adjectives. This is an educational review, not advice.
 
 Return ONLY a JSON object:
@@ -1678,6 +1840,8 @@ def build_review_context(symbol: str, positions: list[Position], question: str |
         parts.append("## Headlines\n" + "\n".join(f"- [{(n.get('date') or '')[:10]}] {n['title']}" for n in get_news(symbol, 10)))
     except HTTPException:
         pass
+    if rel := related_context(symbol):
+        parts.append(rel)
     if cal := calendar_context(symbol):
         parts.append(cal)
     if question:
