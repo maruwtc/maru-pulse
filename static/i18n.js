@@ -140,7 +140,7 @@ const I18N = {
     "No position in {sym}": "沒有 {sym} 的持倉",
     "Use {btn} to enter the shares or option contracts you hold — you'll see live P/L, greeks and a combined payoff, and can ask AI to review it.":
       "使用{btn}輸入你持有的股票或選擇權——即可看到即時損益、Greeks 與組合損益圖，並可請 AI 檢視。",
-    "price unavailable": "無法取得價格", "now {px}": "現價 {px}", "per share": "每股", "{c}/contract": "{c}/口",
+    "price unavailable": "無法取得價格", "now {px}": "現價 {px}", "Shares marked at the {s} price": "股票以{s}價計算", "per share": "每股", "{c}/contract": "{c}/口",
     "LONG": "做多", "SHORT": "做空", "Market value": "市值", "cost {c}": "成本 {c}", "Unrealized P/L": "未實現損益",
     "Net delta": "淨 Delta", "sh": "股", "Theta / day": "每日 Theta", "Position": "持倉", "Unit cost": "單位成本", "Value": "價值", "P/L": "損益", "Θ/day": "Θ/日",
     "Share-equivalent exposure: P/L change per $1 move in the stock": "等值股數曝險：股價每變動 $1 的損益變化",

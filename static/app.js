@@ -548,7 +548,20 @@ function renderExt(e) {
   el.hidden = false;
   el.innerHTML = `${e.kind === "pre" ? SUNRISE : MOON}<span class="lbl">${esc(window.t(e.label))}</span><span class="px">${fmt(e.price)}</span>
     <span class="ch ${cls(e.change)}">${e.change >= 0 ? "+" : ""}${fmt(e.change)} (${pct(e.change_percent)})</span>${t ? `<span class="muted tiny">${t} ET</span>` : ""}`;
-  if (state.posEval && e && state.posEval.rows.some((r) => r.kind === "stock")) renderPositions();
+  renderTopQuote();
+}
+
+// The docked header quote shows the latest trade: the pre-market / after-hours print when there is one.
+function renderTopQuote() {
+  const e = state.ext?.price != null ? state.ext : null;
+  const q = state.quote || {};
+  const price = e ? e.price : state.lastPrice ?? q.last_price;
+  const ch = e ? e.change_percent : state.lastChangePct ?? q.change_percent;
+  $("#tq-tag").hidden = !e;
+  if (e) { $("#tq-tag").textContent = extShort(e); $("#tq-tag").title = window.t(e.label); }
+  $("#tq-px").textContent = fmt(price);
+  $("#tq-ch").textContent = ch == null ? "" : pct(ch);
+  $("#tq-ch").className = `tq-ch chg-chip ${cls(ch)}`;
 }
 
 function setShowExt(on) {
@@ -569,13 +582,12 @@ function setPrice(price, change, changePct) {
     setTimeout(() => el.classList.remove("flash-up", "flash-down"), 700);
   }
   state.lastPrice = price;
+  state.lastChangePct = changePct;
   el.textContent = fmt(price);
   const c = $("#q-change");
   c.textContent = change == null ? "" : `${change >= 0 ? "+" : ""}${fmt(change)} (${pct(changePct)})`;
   c.className = `delta ${cls(change)}`;
-  $("#tq-px").textContent = fmt(price);
-  $("#tq-ch").textContent = changePct == null ? "" : pct(changePct);
-  $("#tq-ch").className = `tq-ch chg-chip ${cls(changePct)}`;
+  renderTopQuote();
   if (state.range === "1D" && state.bars.length) renderRangeReturn();
   const s = marketStatus();
   $("#q-updated").textContent = s.key === "open"
@@ -687,7 +699,11 @@ async function loadStockNews(symbol, quiet = false) {
   if (!quiet) $("#stock-news").innerHTML = skeleton(6);
   try {
     const items = await withRetry(() => api(`/api/news/${symbol}?limit=20`), { tries: 2 });
-    if (symbol === state.symbol) $("#stock-news").innerHTML = newsHTML(items);
+    if (symbol !== state.symbol) return;
+    // Leveraged ETFs come back merged with their underlying's news — tag each story with its ticker.
+    const syms = [...new Set(items.map((n) => n.symbol).filter(Boolean))];
+    if (syms.some((s) => s !== symbol)) $("#stock-news-title").textContent = t("{sym} News", { sym: [symbol, ...syms.filter((s) => s !== symbol)].join(" · ") });
+    $("#stock-news").innerHTML = newsHTML(items, { showSym: syms.length > 1 || (syms.length === 1 && syms[0] !== symbol) });
   } catch {
     if (symbol === state.symbol && !quiet) $("#stock-news").innerHTML = `<div class="muted" style="padding:12px 0">${t("No news found for {sym}.", { sym: esc(symbol) })}</div>`;
   }
@@ -2322,13 +2338,11 @@ async function evaluatePositions() {
 const ACTION_TONE = { hold: "good", add: "good", take_profit: "good", trim: "mid", roll: "mid", hedge: "mid", cut_loss: "bad", close: "bad" };
 const VERDICT_TONE = { hold: "good", add: "good", trim: "mid", roll: "mid", hedge: "mid", close: "bad" };
 
-// Shares keep trading pre/post market; options don't, so only stock legs move.
+// Outside the regular session shares are marked at the pre-market / after-hours price (options can't trade there).
 function extPnl(ev) {
-  const e = state.ext;
-  const stock = ev.rows.filter((r) => r.kind === "stock");
-  if (!e || e.price == null || !stock.length) return "";
-  const d = stock.reduce((a, r) => a + (r.side === "buy" ? 1 : -1) * r.qty * (e.price - r.mark), 0);
-  return `<div class="ext-mini" title="Change in your shares' value at the ${esc(e.label.toLowerCase())} price (${fmt(e.price)})">${esc(e.label)} <b class="${cls(d)}">${d >= 0 ? "+" : ""}${money(d)}</b></div>`;
+  const e = ev.session;
+  if (!e || !ev.rows.some((r) => r.kind === "stock")) return "";
+  return `<div class="ext-mini" title="${esc(t("Shares marked at the {s} price", { s: t(e.label) }))}">${esc(t(e.label))} ${fmt(e.price)}</div>`;
 }
 
 function renderPositions() {
@@ -2350,7 +2364,7 @@ function renderPositions() {
     const sub = r.unpriced ? `<span class="warn-note" style="margin:0">price unavailable</span>`
       : r.kind === "option"
       ? `${r.quoted === false ? "last" : "mid"} ${fmt(r.mark)} · ${r.dte}d · ${r.moneyness}${r.iv ? ` · IV ${fmt(r.iv, 0)}%` : ""}`
-      : t("now {px}", { px: fmt(r.mark) });
+      : t("now {px}", { px: fmt(r.mark) }) + (ev.session ? ` · ${extShort(ev.session)}` : "");
     const a = actions[r.index];
     return `<tr>
       <td><div class="desc"><span class="kind ${r.side === "buy" ? "long" : "short"}">${r.side === "buy" ? "LONG" : "SHORT"}</span><div><b>${esc(r.label.replace(/^(Long|Short) /, ""))}</b><div class="sub">${sub}</div></div></div></td>
@@ -3010,7 +3024,7 @@ route();
 setInterval(renderStatus, 30000);
 setInterval(() => { if (state.cal) { renderUpNext(); if (!state.symbol) renderCalendarNext(); } }, 30000);
 setInterval(loadCalendar, 15 * 60000); // also feeds the sidebar "Up next" on every page
-setInterval(() => { if (state.symbol && state.positions?.length && marketStatus().key === "open") evaluatePositions(); }, 30000);
+setInterval(() => { if (state.symbol && state.positions?.length && marketStatus().key !== "closed") evaluatePositions(); }, 30000);
 setInterval(() => { if (!state.symbol) loadIndices(); }, 20000);
 setInterval(() => refreshWatchlist(false), 10000);
 setInterval(() => refreshWatchlist(true), 120000);
