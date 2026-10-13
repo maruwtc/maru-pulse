@@ -13,6 +13,19 @@
         "3"
       ],
       "port": 8000
+    },
+    {
+      "name": "maru-pulse-win",
+      "runtimeExecutable": ".venv/Scripts/uvicorn.exe",
+      "runtimeArgs": [
+        "app.main:app",
+        "--port",
+        "8000",
+        "--reload",
+        "--timeout-graceful-shutdown",
+        "3"
+      ],
+      "port": 8000
     }
   ]
 }
