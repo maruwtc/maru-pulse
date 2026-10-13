@@ -254,7 +254,52 @@
             </div>
           </section>
 
-          <section class="card trade-card" id="trade-card">
+          <nav class="stock-tabs" id="stock-tabs" role="tablist" aria-label="Stock sections">
+            <button data-tab="overview" role="tab">Overview</button>
+            <button data-tab="analysis" role="tab"><span class="st-ic">✦</span>AI Analysis</button>
+            <button data-tab="trade" role="tab"><span class="st-ic">⚡</span>Trade Ideas</button>
+            <button data-tab="options" role="tab">Options</button>
+            <button data-tab="position" role="tab">My Position<span class="n" id="pos-count" hidden></span></button>
+          </nav>
+
+          <section data-panel="overview" class="card">
+            <div class="card-head">
+              <h2>Key Statistics</h2>
+            </div>
+            <div class="ranges" id="ranges"></div>
+            <div class="stats" id="stats"></div>
+          </section>
+
+          <section data-panel="overview" class="card" id="about-card" hidden>
+            <div class="card-head">
+              <h2>About</h2><a class="muted tiny link" id="about-url" target="_blank" rel="noopener"></a>
+            </div>
+            <div class="about-facts" id="about-facts"></div>
+            <p class="about-text" id="about-text"></p>
+            <button class="link-btn" id="about-more">Show more</button>
+          </section>
+
+          <section data-panel="analysis" class="card ai-card">
+            <div class="card-head">
+              <div class="ai-title">
+                <span class="ai-mark">✦</span>
+                <div>
+                  <h2>AI Analysis</h2>
+                  <div class="muted tiny">News, technicals &amp; fundamentals synthesized by an LLM via OpenRouter</div>
+                </div>
+              </div>
+              <div class="ai-controls">
+                <button class="model-chip" data-open-settings title="AI model — change in Settings"><span
+                    class="mc-name">AI model</span></button>
+                <button id="analyze-btn" class="btn primary"><span>Analyze</span></button>
+              </div>
+            </div>
+            <textarea id="ai-question" class="ai-question" rows="2" maxlength="1000"
+              placeholder="Optional question — e.g. “Earnings beat big but the stock didn’t rise after hours — why?” or “財報開很好，但盤後沒有漲，為什麼？”"></textarea>
+            <div id="ai-body"></div>
+          </section>
+
+          <section data-panel="trade" class="card trade-card" id="trade-card">
             <div class="card-head">
               <div class="ai-title">
                 <span class="ai-mark trade">⚡</span>
@@ -295,7 +340,33 @@
               Prices are delayed mid-quotes; verify with your broker before trading.</p>
           </section>
 
-          <section class="card pos-card" id="pos-card">
+          <section data-panel="options" class="card chain-card" id="opt-card">
+            <div class="card-head">
+              <div>
+                <h2>Options</h2>
+                <div class="muted tiny" id="opt-sub">Chain by expiration · delayed quotes</div>
+              </div>
+              <div class="opt-controls">
+                <select id="opt-exp" aria-label="Expiration"></select>
+                <select id="opt-strikes" aria-label="Strikes around spot"
+                  title="Strikes shown above / below the current price">
+                  <option value="10">±10 strikes</option>
+                  <option value="25">±25 strikes</option>
+                  <option value="50">±50 strikes</option>
+                  <option value="0">All strikes</option>
+                </select>
+                <div class="seg small" id="opt-view">
+                  <button data-view="both" class="active">Both</button><button data-view="call">Calls</button><button
+                    data-view="put">Puts</button>
+                </div>
+              </div>
+            </div>
+            <div class="stats opt-stats" id="opt-stats"></div>
+            <div class="opt-flow" id="opt-flow"></div>
+            <div class="opt-table-wrap" id="opt-table"></div>
+          </section>
+
+          <section data-panel="position" class="card pos-card" id="pos-card">
             <div class="card-head">
               <div class="ai-title">
                 <span class="ai-mark pos">
@@ -362,69 +433,6 @@
                 placeholder="Optional question — e.g. “Should I roll my calls out to November?” or “Earnings are next week, how do I protect gains?”"></textarea>
               <div id="pos-review-body"></div>
             </div>
-          </section>
-
-          <section class="card ai-card">
-            <div class="card-head">
-              <div class="ai-title">
-                <span class="ai-mark">✦</span>
-                <div>
-                  <h2>AI Analysis</h2>
-                  <div class="muted tiny">News, technicals &amp; fundamentals synthesized by an LLM via OpenRouter</div>
-                </div>
-              </div>
-              <div class="ai-controls">
-                <button class="model-chip" data-open-settings title="AI model — change in Settings"><span
-                    class="mc-name">AI model</span></button>
-                <button id="analyze-btn" class="btn primary"><span>Analyze</span></button>
-              </div>
-            </div>
-            <textarea id="ai-question" class="ai-question" rows="2" maxlength="1000"
-              placeholder="Optional question — e.g. “Earnings beat big but the stock didn’t rise after hours — why?” or “財報開很好，但盤後沒有漲，為什麼？”"></textarea>
-            <div id="ai-body"></div>
-          </section>
-
-          <section class="card">
-            <div class="card-head">
-              <h2>Key Statistics</h2>
-            </div>
-            <div class="ranges" id="ranges"></div>
-            <div class="stats" id="stats"></div>
-          </section>
-
-          <section class="card chain-card" id="opt-card">
-            <div class="card-head">
-              <div>
-                <h2>Options</h2>
-                <div class="muted tiny" id="opt-sub">Chain by expiration · delayed quotes</div>
-              </div>
-              <div class="opt-controls">
-                <select id="opt-exp" aria-label="Expiration"></select>
-                <select id="opt-strikes" aria-label="Strikes around spot"
-                  title="Strikes shown above / below the current price">
-                  <option value="10">±10 strikes</option>
-                  <option value="25">±25 strikes</option>
-                  <option value="50">±50 strikes</option>
-                  <option value="0">All strikes</option>
-                </select>
-                <div class="seg small" id="opt-view">
-                  <button data-view="both" class="active">Both</button><button data-view="call">Calls</button><button
-                    data-view="put">Puts</button>
-                </div>
-              </div>
-            </div>
-            <div class="stats opt-stats" id="opt-stats"></div>
-            <div class="opt-flow" id="opt-flow"></div>
-            <div class="opt-table-wrap" id="opt-table"></div>
-          </section>
-
-          <section class="card" id="about-card" hidden>
-            <div class="card-head">
-              <h2>About</h2><a class="muted tiny link" id="about-url" target="_blank" rel="noopener"></a>
-            </div>
-            <div class="about-facts" id="about-facts"></div>
-            <p class="about-text" id="about-text"></p>
-            <button class="link-btn" id="about-more">Show more</button>
           </section>
         </div>
 
