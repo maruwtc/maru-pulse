@@ -288,6 +288,15 @@ select option { background: var(--panel); color: var(--text); }
 
 .stock-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
 .stock-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+/* Tab strip for the stock tools; only the active tab's cards are shown */
+.stock-tabs { position: sticky; top: 60px; z-index: 6; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: -6px 0 -8px; padding: 6px 0 0; background: var(--bg); border-bottom: 1px solid var(--border); scroll-margin-top: 60px; }
+.stock-tabs::-webkit-scrollbar { display: none; }
+.stock-tabs button { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; color: var(--muted); font: 600 13.5px Inter, sans-serif; cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s; }
+.stock-tabs button:hover { color: var(--text); }
+.stock-tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+.stock-tabs .st-ic { font-size: 12px; opacity: .8; }
+.stock-tabs .n { font: 600 10.5px "JetBrains Mono", monospace; padding: 1px 6px; border-radius: 999px; background: var(--hover); color: var(--text-2); }
+.stock-main [data-panel]:not(.on) { display: none; }
 .stock-side { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow-y: auto; border-radius: var(--radius); }
 
 .chart-card { padding: 14px 14px 8px; }
@@ -782,6 +791,7 @@ body.chart-expanded { overflow: hidden; }
 @media (max-width: 1180px) {
   .home-grid, .stock-grid { grid-template-columns: minmax(0, 1fr); }
   .movers-card, .stock-side { position: static; max-height: none; }
+  #stock-view:not([data-tab="overview"]) .stock-side { display: none; }
   .about-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 900px) {

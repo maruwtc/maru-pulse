@@ -112,6 +112,7 @@ const I18N = {
     "Momentum": "動能", "Close vs 20D high: {v}": "收盤價 vs 20 日高點：{v}",
 
     // ---- options chain
+    "Overview": "概覽", "Trade Ideas": "交易點子",
     "Options": "選擇權", "Chain by expiration · delayed quotes": "依到期日的選擇權鏈 · 延遲報價",
     "Chain by expiration · {src}": "依到期日的選擇權鏈 · {src}", "delayed mid-quotes": "延遲中間價", "last trade prices (market closed)": "最後成交價（已收盤）",
     "Expiration": "到期日", "Strikes around spot": "現價附近履約價", "Strikes shown above / below the current price": "顯示現價上下的履約價數量",

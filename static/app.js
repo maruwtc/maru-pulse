@@ -1774,6 +1774,36 @@ function renderOptions() {
   if (optState.focus) focusContract();
 }
 
+/* ================================================================ stock page tabs */
+// The tools below the chart live in one tab strip instead of a long stack of cards.
+const STOCK_TABS = ["overview", "analysis", "trade", "options", "position"];
+state.stockTab = STOCK_TABS.includes(store.get("mp.stockTab")) ? store.get("mp.stockTab") : "overview";
+
+function showStockTab(tab, scroll = false) {
+  if (!STOCK_TABS.includes(tab)) return;
+  state.stockTab = tab;
+  store.set("mp.stockTab", tab);
+  $$("#stock-tabs button").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on);
+  });
+  $$("#stock-view [data-panel]").forEach((el) => el.classList.toggle("on", el.dataset.panel === tab));
+  $("#stock-view").dataset.tab = tab; // narrow screens show Events & News under Overview only
+  const bar = $("#stock-tabs"), btn = $("button.active", bar); // keep the active tab in view on phones (horizontal only)
+  if (btn) bar.scrollLeft = Math.max(0, Math.min(bar.scrollLeft, btn.offsetLeft - 8), btn.offsetLeft + btn.offsetWidth - bar.clientWidth + 8);
+  if (tab === "options") { // the chain was laid out while hidden: re-center the at-the-money strikes
+    const wrap = $("#opt-table"), spotRow = $(".spot-row", wrap);
+    if (spotRow && !optState.focus) wrap.scrollTop = spotRow.offsetTop - wrap.clientHeight / 2;
+  }
+  if (scroll && bar.getBoundingClientRect().top <= 61) bar.scrollIntoView({ block: "start" });
+}
+$("#stock-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-tab]");
+  if (b) showStockTab(b.dataset.tab, true);
+});
+showStockTab(state.stockTab);
+
 // Jump to the contract picked in Biggest flow and blink it for a few seconds.
 function focusContract() {
   const { strike, kind, expiration } = optState.focus;
@@ -2304,6 +2334,8 @@ function extPnl(ev) {
 function renderPositions() {
   const ev = state.posEval;
   $("#pos-review").hidden = !state.positions.length;
+  $("#pos-count").hidden = !state.positions.length;
+  $("#pos-count").textContent = state.positions.length;
   drawLevels();
   if (!state.positions.length) {
     $("#pos-body").innerHTML = `<div class="pos-empty"><b>${t("No position in {sym}", { sym: esc(state.symbol) })}</b><div class="muted tiny">${t("Use {btn} to enter the shares or option contracts you hold — you'll see live P/L, greeks and a combined payoff, and can ask AI to review it.", { btn: `<b>${t("+ Add position")}</b>` })}</div></div>`;
