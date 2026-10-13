@@ -298,6 +298,8 @@ select option { background: var(--panel); color: var(--text); }
 .stock-tabs .st-ic { font-size: 12px; opacity: .8; }
 .stock-tabs .n { font: 600 10.5px "JetBrains Mono", monospace; padding: 1px 6px; border-radius: 999px; background: var(--hover); color: var(--text-2); }
 .stock-main [data-panel]:not(.on) { display: none; }
+/* At least a viewport tall below the sticky tab bar, so switching to a short tab never shrinks the page and jumps the scroll. */
+.stock-panels { display: flex; flex-direction: column; gap: 20px; min-height: calc(100vh - 116px); }
 .stock-side { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow-y: auto; border-radius: var(--radius); }
 
 .chart-card { padding: 14px 14px 8px; }
