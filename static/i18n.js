@@ -79,6 +79,7 @@ const I18N = {
     "Entry": "進場", "Stop": "停損", "Vol": "量",
 
     // ---- trade opportunities / signals
+    "Day & 52-week ranges, volume and valuation": "當日與 52 週區間、成交量及估值", "Sector, industry & business description": "產業、行業與業務描述",
     "Trade Opportunities": "交易機會", "AI stock setups & option strategies, priced from the real chain": "AI 股票操作與選擇權策略，依實際報價計算",
     "AI model — change in Settings": "AI 模型——可在設定中變更", "AI model": "AI 模型", "Generate ideas": "產生建議", "Generating…": "產生中…",
     "Regenerate": "重新產生", "Risk profile": "風險偏好", "Conservative": "保守", "Moderate": "穩健", "Aggressive": "積極",
@@ -247,7 +248,7 @@ const I18N = {
     "Continue with Google": "使用 Google 繼續", "We only receive your name, email and profile picture from Google.": "我們只會從 Google 取得你的姓名、電子郵件與大頭貼。",
     "Settings": "設定", "Account": "帳號", "Sign out": "登出", "OpenRouter API key": "OpenRouter API 金鑰", "Get a key ↗": "取得金鑰 ↗", "Setup guide": "設定教學", "Free key setup guide →": "免費金鑰設定教學 →",
     "Verify & save": "驗證並儲存", "Verifying…": "驗證中…", "Saving…": "儲存中…",
-    "Preferences": "偏好設定", "Default AI model": "預設 AI 模型", "Theme": "主題", "Dark": "深色", "Light": "淺色",
+    "Preferences": "偏好設定", "Default AI model": "預設 AI 模型", "Theme": "主題", "Device": "跟隨裝置", "Not signed in": "尚未登入", "Sign in to use AI and sync your watchlist and settings across devices.": "登入即可使用 AI，並在各裝置同步自選清單與設定。", "Preferences are saved in this browser.": "偏好設定儲存在此瀏覽器。", "Dark": "深色", "Light": "淺色",
     "Deep think by default": "預設啟用深度思考", "Show extended-hours trading on charts": "在圖表顯示盤前盤後交易",
     "Show support / resistance levels on charts": "在圖表顯示支撐／壓力價位", "USD per 1M tokens (input / output)": "每百萬 token 美元價格（輸入／輸出）",
     "✓ Key saved": "✓ 金鑰已儲存", "updated {ago}": "更新於 {ago}", "No key saved": "尚未儲存金鑰",
